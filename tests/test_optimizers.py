@@ -1,20 +1,9 @@
 import copy
 
-import pytest
 import torch
 
+from torchsim.optimizers import fire
 from torchsim.state import BaseState, concatenate_states
-
-
-# skip tests if we don't have torch scatter
-try:
-    from torchsim.optimizers import fire
-
-except ImportError:
-    pytest.skip(
-        "torch_scatter not installed, skipping batched optimizer tests",
-        allow_module_level=True,
-    )
 
 
 def test_fire_optimization(

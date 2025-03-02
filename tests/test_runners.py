@@ -1,7 +1,6 @@
 from typing import Any
 
 import numpy as np
-import pytest
 import torch
 from ase import Atoms
 from pymatgen.core import Structure
@@ -189,7 +188,6 @@ def test_integrate_many_nvt(
     assert not torch.allclose(final_state.energy[0], final_state.energy[2], atol=1e-2)
 
 
-@pytest.importorskip("torch_scatter")
 def test_optimize_fire(
     si_base_state: BaseState, lj_calculator: Any, tmp_path: Any
 ) -> None:
@@ -224,7 +222,6 @@ def test_optimize_fire(
     assert not torch.allclose(original_state.positions, final_state.positions)
 
 
-@pytest.importorskip("torch_scatter")
 def test_default_converged_fn(
     si_base_state: BaseState, lj_calculator: Any, tmp_path: Any
 ) -> None:
@@ -255,7 +252,6 @@ def test_default_converged_fn(
     assert not torch.allclose(original_state.positions, final_state.positions)
 
 
-@pytest.importorskip("torch_scatter")
 def test_batched_optimize_fire(
     si_double_base_state: BaseState,
     lj_calculator: Any,
