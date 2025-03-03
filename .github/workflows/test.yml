@@ -1,0 +1,127 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  main_tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+        version:
+          - { python: "3.11", resolution: highest }
+          - { python: "3.12", resolution: lowest-direct }
+    runs-on: ${{ matrix.os }}
+
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.version.python }}
+
+      - name: Install torchsim
+        run: |
+          pip install uv
+          uv pip install -e .[test] --resolution=${{ matrix.version.resolution }} --system
+
+      - name: Run Tests
+        run: pytest --ignore=tests/models/test_mace.py --ignore=tests/models/test_fairchem.py
+
+  test_mace:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+        version:
+          - { python: "3.11", resolution: highest }
+          - { python: "3.12", resolution: lowest-direct }
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.version.python }}
+
+      - name: Install torchsim
+        run: |
+          pip install uv
+          uv pip install -e .[test] --resolution=${{ matrix.version.resolution }} --system
+
+      - name: Install mace
+        run: |
+          uv pip install mace-torch --system
+
+      - name: Run Tests with Coverage
+        run: |
+          pytest --cov=torchsim --cov-report=xml tests/models/test_mace.py
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        if: matrix.os == 'ubuntu-latest' && matrix.version.python == '3.12'
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: Radical-AI/torch-sim # TODO codecov can't find this repo despite valid token, needs debugging
+
+  test_fairchem:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+        version:
+          - { python: "3.11", resolution: highest }
+          - { python: "3.12", resolution: lowest-direct }
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Check out fairchem
+        uses: actions/checkout@v4
+        with:
+          repository: FAIR-Chem/fairchem
+          path: fairchem-repo
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.version.python }}
+
+      - name: Install torchsim
+        run: |
+          pip install uv
+          uv pip install -e .[test] --resolution=${{ matrix.version.resolution }} --system
+
+      - name: Install fairchem dependencies
+        run: |
+          if [ -f fairchem-repo/packages/requirements.txt ]; then
+            uv pip install -r fairchem-repo/packages/requirements.txt --system
+          fi
+          if [ -f fairchem-repo/packages/requirements-optional.txt ]; then
+            uv pip install -r fairchem-repo/packages/requirements-optional.txt --system
+          fi
+          uv pip install -e fairchem-repo/packages/fairchem-core[dev] --system
+
+      - name: Run Tests with Coverage
+        run: |
+          pytest --cov=torchsim --cov-report=xml tests/models/test_fairchem.py
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        if: matrix.os == 'ubuntu-latest' && matrix.version.python == '3.12'
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: Radical-AI/torch-sim # TODO codecov can't find this repo despite valid token, needs debugging

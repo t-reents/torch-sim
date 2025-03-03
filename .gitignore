@@ -1,0 +1,9 @@
+# ephemeral python files
+__pycache__
+.venv
+*.pyc
+
+# package install files
+build/
+dist/
+*.egg-info
