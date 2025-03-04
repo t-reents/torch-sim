@@ -2,7 +2,7 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 import torch
 
@@ -10,6 +10,11 @@ from torchsim.quantities import count_dof, kinetic_energy
 from torchsim.state import BaseState
 from torchsim.transforms import pbc_wrap_general
 from torchsim.utils import calculate_momenta
+
+
+StateDict = dict[
+    Literal["positions", "masses", "cell", "pbc", "atomic_numbers"], torch.Tensor
+]
 
 
 @dataclass
@@ -231,7 +236,7 @@ def nve(
     """
 
     def nve_init(
-        input_data: BaseState | dict,
+        input_data: BaseState | StateDict,
         kT: torch.Tensor,
         seed: int | None = None,
         **extra_state_kwargs: Any,
@@ -252,42 +257,32 @@ def nve(
         dtype = model.dtype
 
         # Extract required data from input
-        if isinstance(input_data, BaseState):
-            positions = input_data.positions
-            masses = input_data.masses
-            cell = input_data.cell
-            pbc = input_data.pbc
-            atomic_numbers = input_data.atomic_numbers
-        else:
-            positions = input_data["positions"]
-            masses = input_data["masses"]
-            cell = input_data["cell"]
-            pbc = input_data["pbc"]
-            atomic_numbers = input_data.get("atomic_numbers")
+        if not isinstance(input_data, BaseState):
+            state = BaseState(**input_data)
 
         # Override with extra_state_kwargs if provided
-        atomic_numbers = extra_state_kwargs.get("atomic_numbers", atomic_numbers)
+        atomic_numbers = extra_state_kwargs.get("atomic_numbers", state.atomic_numbers)
 
         model_output = model(
-            positions=positions,
-            cell=cell,
-            atomic_numbers=atomic_numbers,
+            positions=state.positions,
+            cell=state.cell,
+            atomic_numbers=state.atomic_numbers,
         )
 
         momenta = (
             extra_state_kwargs.get("momenta")
             if extra_state_kwargs.get("momenta") is not None
-            else calculate_momenta(positions, masses, kT, device, dtype, seed)
+            else calculate_momenta(state.positions, state.masses, kT, device, dtype, seed)
         )
 
         initial_state = MDState(
-            positions=positions,
+            positions=state.positions,
             momenta=momenta,
             energy=model_output["energy"],
             forces=model_output["forces"],
-            masses=masses,
-            cell=cell,
-            pbc=pbc,
+            masses=state.masses,
+            cell=state.cell,
+            pbc=state.pbc,
             atomic_numbers=atomic_numbers,
         )
         return initial_state  # noqa: RET504

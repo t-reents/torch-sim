@@ -2,12 +2,17 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 import torch
 
 from torchsim.state import BaseState
 from torchsim.transforms import pbc_wrap_batched
+
+
+StateDict = dict[
+    Literal["positions", "masses", "cell", "pbc", "atomic_numbers"], torch.Tensor
+]
 
 
 @dataclass
@@ -239,7 +244,7 @@ def nve(
     """
 
     def nve_init(
-        input_data: BaseState | dict,
+        input_data: BaseState | StateDict,
         kT: torch.Tensor,
         seed: int | None = None,
         **extra_state_kwargs: Any,
@@ -257,46 +262,34 @@ def nve(
             MDState: Initialized state for NVE integration
         """
         # Extract required data from input
-        if isinstance(input_data, BaseState):
-            positions = input_data.positions
-            masses = input_data.masses
-            cell = input_data.cell
-            pbc = input_data.pbc
-            batch = getattr(input_data, "batch", None)
-            atomic_numbers = input_data.atomic_numbers
-        else:
-            positions = input_data["positions"]
-            masses = input_data["masses"]
-            cell = input_data["cell"]
-            pbc = input_data["pbc"]
-            batch = input_data.get("batch")
-            atomic_numbers = input_data.get("atomic_numbers")
+        if not isinstance(input_data, BaseState):
+            state = BaseState(**input_data)
 
         # Override with extra_state_kwargs if provided
-        atomic_numbers = extra_state_kwargs.get("atomic_numbers", atomic_numbers)
-        batch = extra_state_kwargs.get("batch", batch)
+        atomic_numbers = extra_state_kwargs.get("atomic_numbers", state.atomic_numbers)
+        batch = extra_state_kwargs.get("batch", state.batch)
 
         model_output = model(
-            positions=positions,
-            cell=cell,
-            batch=batch,
-            atomic_numbers=atomic_numbers,
+            positions=state.positions,
+            cell=state.cell,
+            batch=state.batch,
+            atomic_numbers=state.atomic_numbers,
         )
 
         momenta = (
             extra_state_kwargs.get("momenta")
             if extra_state_kwargs.get("momenta") is not None
-            else calculate_momenta(positions, masses, kT, seed)
+            else calculate_momenta(state.positions, state.masses, kT, seed)
         )
 
         initial_state = MDState(
-            positions=positions,
+            positions=state.positions,
             momenta=momenta,
             energy=model_output["energy"],
             forces=model_output["forces"],
-            masses=masses,
-            cell=cell,
-            pbc=pbc,
+            masses=state.masses,
+            cell=state.cell,
+            pbc=state.pbc,
             batch=batch,
             atomic_numbers=atomic_numbers,
         )
