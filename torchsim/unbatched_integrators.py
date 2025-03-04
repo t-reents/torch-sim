@@ -236,7 +236,7 @@ def nve(
     """
 
     def nve_init(
-        input_data: BaseState | StateDict,
+        input_state: BaseState | StateDict,
         kT: torch.Tensor,
         seed: int | None = None,
         **extra_state_kwargs: Any,
@@ -244,7 +244,7 @@ def nve(
         """Initialize an NVE state from input data.
 
         Args:
-            input_data: Either a BaseState object or a dictionary containing positions,
+            input_state: Either a BaseState object or a dictionary containing positions,
                 masses, cell, pbc
             kT: Temperature in energy units for initializing momenta
             seed: Random seed for reproducibility
@@ -257,8 +257,10 @@ def nve(
         dtype = model.dtype
 
         # Extract required data from input
-        if not isinstance(input_data, BaseState):
-            state = BaseState(**input_data)
+        if not isinstance(input_state, BaseState):
+            state = BaseState(**input_state)
+        else:
+            state = input_state
 
         # Override with extra_state_kwargs if provided
         atomic_numbers = extra_state_kwargs.get("atomic_numbers", state.atomic_numbers)
