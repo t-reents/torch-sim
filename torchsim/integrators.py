@@ -371,7 +371,16 @@ def nvt_langevin(
         - Preserves detailed balance for correct NVT sampling
         - Handles periodic boundary conditions if enabled in state
     """
+    device = model.device
+    dtype = model.dtype
+
     gamma = gamma or 1 / (100 * dt)
+
+    if isinstance(gamma, float):
+        gamma = torch.tensor(gamma, device=device, dtype=dtype)
+
+    if isinstance(dt, float):
+        dt = torch.tensor(dt, device=device, dtype=dtype)
 
     def langevin_init(
         state: BaseState | StateDict,
@@ -438,6 +447,12 @@ def nvt_langevin(
         Returns:
             Updated state after one complete Langevin step
         """
+        if isinstance(gamma, float):
+            gamma = torch.tensor(gamma, device=device, dtype=dtype)
+
+        if isinstance(dt, float):
+            dt = torch.tensor(dt, device=device, dtype=dtype)
+
         state = momentum_step(state, dt / 2)
         state = position_step(state, dt / 2)
         state = stochastic_step(state, dt, kT, gamma)

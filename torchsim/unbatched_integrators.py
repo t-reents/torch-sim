@@ -368,6 +368,12 @@ def nvt_langevin(
     dtype = model.dtype
     gamma = gamma or 1 / (100 * dt)
 
+    if isinstance(gamma, float):
+        gamma = torch.tensor(gamma, device=device, dtype=dtype)
+
+    if isinstance(dt, float):
+        dt = torch.tensor(dt, device=device, dtype=dtype)
+
     def langevin_init(
         state: BaseState | StateDict,
         kT: torch.Tensor = kT,
@@ -441,6 +447,12 @@ def nvt_langevin(
         Returns:
             MDState: Updated state after one complete Langevin step
         """
+        if isinstance(gamma, float):
+            gamma = torch.tensor(gamma, device=device, dtype=dtype)
+
+        if isinstance(dt, float):
+            dt = torch.tensor(dt, device=device, dtype=dtype)
+
         state = momentum_step(state, dt / 2)
         state = position_step(state, dt / 2)
         state = stochastic_step(state, dt, kT, gamma, device, dtype)
