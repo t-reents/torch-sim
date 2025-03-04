@@ -1,7 +1,5 @@
-from dataclasses import asdict
 from typing import Any
 
-import pytest
 import torch
 
 from torchsim.quantities import kinetic_energy
@@ -12,10 +10,12 @@ from torchsim.utils import calculate_momenta
 
 # skip all tests in this file for now
 
+"""
 pytest.skip(
     reason="Unbatched integrators deprecated, skipping integrator tests",
     allow_module_level=True,
 )
+"""
 
 
 def test_nve_integrator(si_base_state: BaseState, unbatched_lj_calculator: Any) -> None:
@@ -85,21 +85,21 @@ def test_nvt_nose_hoover_integrator(
 
     si_base_state.cell = si_base_state.cell.squeeze(0)
 
-    state, update_fn = nvt_nose_hoover(
-        **asdict(si_base_state),
+    nvt_init, nvt_update = nvt_nose_hoover(
         model=unbatched_lj_calculator,
         dt=dt,
         kT=target_temp,
         chain_length=3,
         chain_steps=3,
         sy_steps=3,
-        seed=42,
     )
+
+    state = nvt_init(state=si_base_state, seed=42)
 
     # Run equilibration
     temperatures = []
     for _ in range(500):
-        state = update_fn(state, target_temp)
+        state = nvt_update(state, target_temp)
         KE = kinetic_energy(state.momenta, state.masses)
         temp = 2 * KE / (3 * len(state.masses))
         temperatures.append(temp)
@@ -135,7 +135,7 @@ def test_integrator_state_properties(
         atomic_numbers=si_base_state.atomic_numbers,
     )
 
-    for integrator in [nve, nvt_langevin]:
+    for integrator in [nve, nvt_langevin, nvt_nose_hoover]:
         init_fn, update_fn = integrator(
             model=unbatched_lj_calculator,
             dt=torch.tensor(0.001),

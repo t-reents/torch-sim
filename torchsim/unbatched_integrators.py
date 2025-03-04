@@ -761,50 +761,124 @@ class NVTNoseHooverState(MDState):
 
 def nvt_nose_hoover(
     *,
-    positions: torch.Tensor,
-    masses: torch.Tensor,
-    cell: torch.Tensor,
-    pbc: bool,
     model: torch.nn.Module,
     dt: torch.Tensor,
     kT: torch.Tensor,
     chain_length: int = 3,
     chain_steps: int = 3,
     sy_steps: int = 3,
-    tau: torch.Tensor | None = None,
-    seed: int | None = None,
-    **extra_state_kwargs: Any,
 ) -> tuple[
-    NVTNoseHooverState, Callable[[NVTNoseHooverState, torch.Tensor], NVTNoseHooverState]
+    Callable[[BaseState | StateDict, torch.Tensor, int | None, Any], NVTNoseHooverState],
+    Callable[[NVTNoseHooverState, torch.Tensor], NVTNoseHooverState],
 ]:
-    """Integrate NVT system with Nose-Hoover chain thermostat.
+    """Initialize NVT Nose-Hoover chain thermostat integration.
 
-    This function integrates the NVT system using a Nose-Hoover chain thermostat.
-    It computes the forces, initializes momenta, and sets up the chain thermostat.
+    This function sets up integration of an NVT system using a Nose-Hoover chain
+    thermostat. The Nose-Hoover chain provides deterministic temperature control by
+    coupling the system to a chain of thermostats. The integration scheme is
+    time-reversible and conserves an extended energy quantity.
 
     Args:
-        model: Model to compute forces
-        positions: Particle positions with shape [n_particles, n_dimensions]
-        momenta: Particle momenta with shape [n_particles, n_dimensions]
-        masses: Particle masses with shape [n_particles]
-        cell: Simulation cell matrix with shape [n_dimensions, n_dimensions]
-        pbc: Whether to use periodic boundary conditions
+        model: Neural network model that computes energies and forces
         dt: Integration timestep
-        kT: Target temperature
-        chain_length: Number of thermostats in Nose-Hoover chain
-        chain_steps: Number of chain integration substeps
-        sy_steps: Number of Suzuki-Yoshida steps (1, 3, 5, or 7)
-        tau: Temperature relaxation time (defaults to 100*dt)
-        seed: Random seed for momenta initialization
-        extra_state_kwargs: Additional keyword arguments for state initialization
+        kT: Target temperature in energy units
+        chain_length: Number of thermostats in Nose-Hoover chain (default: 3)
+        chain_steps: Number of chain integration substeps (default: 3)
+        sy_steps: Number of Suzuki-Yoshida steps - must be 1, 3, 5, or 7 (default: 3)
 
     Returns:
-        Tuple of (NVTNoseHooverState, Callable[[NVTNoseHooverState, torch.Tensor],
-        NVTNoseHooverState]). The first element is the initialized state, the second is
-        the update function
+        Tuple containing:
+        - Initialization function that takes a state and returns NVTNoseHooverState
+        - Update function that performs one complete integration step
+
+    Notes:
+        The initialization function accepts:
+        - state: Initial system state (BaseState or dict)
+        - kT: Target temperature (optional, defaults to constructor value)
+        - tau: Thermostat relaxation time (optional, defaults to 100*dt)
+        - seed: Random seed for momenta initialization (optional)
+        - **extra_state_kwargs: Additional state variables
+
+        The update function accepts:
+        - state: Current NVTNoseHooverState
+        - dt: Integration timestep (optional, defaults to constructor value)
+        - kT: Target temperature (optional, defaults to constructor value)
+
+        The integration sequence is:
+        1. Update chain masses
+        2. First half-step of chain evolution
+        3. Full velocity Verlet step
+        4. Update chain kinetic energy
+        5. Second half-step of chain evolution
     """
-    device = positions.device
-    dtype = positions.dtype
+    device = model.device
+    dtype = model.dtype
+
+    def nvt_nose_hoover_init(
+        state: BaseState | StateDict,
+        kT: torch.Tensor = kT,
+        tau: torch.Tensor | None = None,
+        seed: int | None = None,
+        **extra_state_kwargs: Any,
+    ) -> NVTNoseHooverState:
+        """Initialize the NVT Nose-Hoover state.
+
+        Args:
+            state: Initial system state as BaseState or dict
+            kT: Target temperature in energy units
+            tau: Thermostat relaxation time (defaults to 100*dt)
+            seed: Random seed for momenta initialization
+            **extra_state_kwargs: Additional state variables
+
+        Returns:
+            Initialized NVTNoseHooverState with positions, momenta, forces,
+            and thermostat chain variables
+        """
+        # Set default tau if not provided
+        if tau is None:
+            tau = dt * 100.0
+
+        # Create thermostat functions
+        chain_fns = construct_nose_hoover_chain(
+            dt, chain_length, chain_steps, sy_steps, tau
+        )
+
+        if not isinstance(state, BaseState):
+            state = BaseState(**state)
+
+        atomic_numbers = extra_state_kwargs.get("atomic_numbers", state.atomic_numbers)
+
+        model_output = model(
+            positions=state.positions,
+            cell=state.cell,
+            atomic_numbers=atomic_numbers,
+        )
+        momenta = (
+            extra_state_kwargs.get("momenta")
+            if extra_state_kwargs.get("momenta") is not None
+            else calculate_momenta(state.positions, state.masses, kT, device, dtype, seed)
+        )
+
+        # Calculate initial kinetic energy
+        KE = kinetic_energy(momenta, state.masses)
+
+        # Initialize chain with calculated KE
+        dof = count_dof(state.positions)
+
+        # Initialize base state
+        state = NVTNoseHooverState(
+            positions=state.positions,
+            momenta=momenta,
+            energy=model_output["energy"],
+            forces=model_output["forces"],
+            masses=state.masses,
+            cell=state.cell,
+            pbc=state.pbc,
+            atomic_numbers=atomic_numbers,
+            chain=chain_fns.initialize(dof, KE, kT),
+            _chain_fns=chain_fns,  # Store the chain functions
+        )
+        return state  # noqa: RET504
 
     def nvt_nose_hoover_step(
         state: NVTNoseHooverState,
@@ -813,27 +887,21 @@ def nvt_nose_hoover(
     ) -> NVTNoseHooverState:
         """Perform one complete Nose-Hoover chain integration step.
 
-        This function implements the integration scheme for NVT dynamics using a
-        Nose-Hoover chain thermostat. The integration sequence is:
-        1. Update chain masses
-        2. First half-step of chain evolution
-        3. Full velocity Verlet step
-        4. Update chain kinetic energy
-        5. Second half-step of chain evolution
-
         Args:
             state: Current system state containing positions, momenta, forces, and chain
-            kT: Target temperature in energy units
             dt: Integration timestep
+            kT: Target temperature in energy units
 
         Returns:
             Updated state after one complete Nose-Hoover step
 
         Notes:
-            - Time-reversible integration scheme
-            - Deterministic temperature control through extended system
-            - Chain masses are updated to maintain proper temperature coupling
-            - Conserves extended energy in the absence of numerical errors
+            Integration sequence:
+            1. Update chain masses based on target temperature
+            2. First half-step of chain evolution
+            3. Full velocity Verlet step
+            4. Update chain kinetic energy
+            5. Second half-step of chain evolution
         """
         # Get chain functions from state
         chain_fns = state._chain_fns  # noqa: SLF001
@@ -860,46 +928,7 @@ def nvt_nose_hoover(
 
         return state
 
-    # Initialize the NVT Nose-Hoover state
-    # Set default tau if not provided
-    if tau is None:
-        tau = dt * 100.0
-
-    # Create thermostat functions
-    chain_fns = construct_nose_hoover_chain(dt, chain_length, chain_steps, sy_steps, tau)
-
-    model_output = model(
-        positions=positions,
-        cell=cell,
-        atomic_numbers=extra_state_kwargs.get("atomic_numbers"),
-    )
-    momenta = (
-        extra_state_kwargs.get("momenta")
-        if extra_state_kwargs.get("momenta") is not None
-        else calculate_momenta(positions, masses, kT, device, dtype, seed)
-    )
-
-    # Calculate initial kinetic energy
-    KE = kinetic_energy(momenta, masses)
-
-    # Initialize chain with calculated KE
-    dof = count_dof(positions)
-
-    # Initialize base state
-    state = NVTNoseHooverState(
-        positions=positions,
-        momenta=momenta,
-        energy=model_output["energy"],
-        forces=model_output["forces"],
-        masses=masses,
-        cell=cell,
-        pbc=pbc,
-        atomic_numbers=extra_state_kwargs.get("atomic_numbers"),
-        chain=chain_fns.initialize(dof, KE, kT),
-        _chain_fns=chain_fns,  # Store the chain functions
-    )
-
-    return state, nvt_nose_hoover_step
+    return nvt_nose_hoover_init, nvt_nose_hoover_step
 
 
 def nvt_nose_hoover_invariant(
