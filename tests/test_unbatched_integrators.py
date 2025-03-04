@@ -23,7 +23,7 @@ def test_nve_integrator(si_base_state: BaseState, lj_calculator: Any) -> None:
     dt = torch.tensor(0.001)  # Small timestep for stability
 
     nve_init, nve_update = nve(model=lj_calculator)
-    state = nve_init(input_state=si_base_state, kT=kT)
+    state = nve_init(state=si_base_state, kT=kT)
 
     # Store initial energy
     initial_energy = state.energy + kinetic_energy(state.momenta, state.masses)

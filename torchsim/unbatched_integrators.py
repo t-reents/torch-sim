@@ -13,7 +13,7 @@ from torchsim.utils import calculate_momenta
 
 
 StateDict = dict[
-    Literal["positions", "masses", "cell", "pbc", "atomic_numbers"], torch.Tensor
+    Literal["positions", "masses", "cell", "pbc", "atomic_numbers", "batch"], torch.Tensor
 ]
 
 
@@ -259,8 +259,6 @@ def nve(
         # Extract required data from input
         if not isinstance(input_state, BaseState):
             state = BaseState(**input_state)
-        else:
-            state = input_state
 
         # Override with extra_state_kwargs if provided
         atomic_numbers = extra_state_kwargs.get("atomic_numbers", state.atomic_numbers)

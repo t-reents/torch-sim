@@ -262,7 +262,7 @@ def test_nve(
 
     # Initialize integrator
     nve_init, nve_update = nve(model=lj_calculator)
-    state = nve_init(input_state=si_double_base_state, kT=kT, seed=42)
+    state = nve_init(state=si_double_base_state, kT=kT, seed=42)
 
     # Run dynamics for several steps
     energies = []
@@ -295,7 +295,7 @@ def test_compare_single_vs_batched_integrators(
         dt = torch.tensor(0.001)  # Small timestep for stability
 
         nve_init, nve_update = nve(model=lj_calculator)
-        state = nve_init(input_state=state, kT=kT, seed=42)
+        state = nve_init(state=state, kT=kT, seed=42)
         state.momenta = torch.zeros_like(state.momenta)
 
         for _ in range(100):

@@ -11,7 +11,7 @@ from torchsim.transforms import pbc_wrap_batched
 
 
 StateDict = dict[
-    Literal["positions", "masses", "cell", "pbc", "atomic_numbers"], torch.Tensor
+    Literal["positions", "masses", "cell", "pbc", "atomic_numbers", "batch"], torch.Tensor
 ]
 
 
@@ -244,7 +244,7 @@ def nve(
     """
 
     def nve_init(
-        input_state: BaseState | StateDict,
+        state: BaseState | StateDict,
         kT: torch.Tensor,
         seed: int | None = None,
         **extra_state_kwargs: Any,
@@ -252,7 +252,7 @@ def nve(
         """Initialize an NVE state from input data.
 
         Args:
-            input_state: Either a BaseState object or a dictionary containing positions,
+            state: Either a BaseState object or a dictionary containing positions,
                 masses, cell, pbc
             kT: Temperature in energy units for initializing momenta
             seed: Random seed for reproducibility
@@ -262,10 +262,8 @@ def nve(
             MDState: Initialized state for NVE integration
         """
         # Extract required data from input
-        if not isinstance(input_state, BaseState):
-            state = BaseState(**input_state)
-        else:
-            state = input_state
+        if not isinstance(state, BaseState):
+            state = BaseState(**state)
 
         # Override with extra_state_kwargs if provided
         atomic_numbers = extra_state_kwargs.get("atomic_numbers", state.atomic_numbers)
