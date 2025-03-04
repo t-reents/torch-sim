@@ -1,7 +1,6 @@
 from typing import Any
 
 import numpy as np
-import pytest
 import torch
 from ase import Atoms
 from pymatgen.core import Structure
