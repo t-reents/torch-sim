@@ -65,6 +65,13 @@ atomic_numbers = torch.full((positions.shape[0],), 18, device=device, dtype=torc
 # Create the masses tensor (Argon = 39.948 amu)
 masses = torch.full((positions.shape[0],), 39.948, device=device, dtype=dtype)
 
+input_data = {
+    "positions": positions,
+    "masses": masses,
+    "cell": cell,
+    "pbc": PERIODIC,
+    "atomic_numbers": atomic_numbers,
+}
 # Initialize the Lennard-Jones model
 # Parameters:
 #  - sigma: distance at which potential is zero (3.405 Å for Ar)
@@ -91,18 +98,9 @@ kT = 80 * Units.temperature
 dt = 0.001 * Units.time
 
 # Initialize NVE integrator
-state, nve_update = nve(
-    model=model,
-    positions=positions,
-    masses=masses,
-    cell=cell,
-    pbc=PERIODIC,
-    kT=kT,
-    dt=dt,
-    seed=1,
-    atomic_numbers=atomic_numbers,
-)
+nve_init, nve_update = nve(model=model)
 
+state = nve_init(input_data=input_data, kT=kT)
 # Run NVE simulation for 1000 steps
 for step in range(2_000):
     if step % 100 == 0:
