@@ -880,7 +880,7 @@ def nvt_nose_hoover(
         )
         return state  # noqa: RET504
 
-    def nvt_nose_hoover_step(
+    def nvt_nose_hoover_update(
         state: NVTNoseHooverState,
         dt: torch.Tensor = dt,
         kT: torch.Tensor = kT,
@@ -928,7 +928,7 @@ def nvt_nose_hoover(
 
         return state
 
-    return nvt_nose_hoover_init, nvt_nose_hoover_step
+    return nvt_nose_hoover_init, nvt_nose_hoover_update
 
 
 def nvt_nose_hoover_invariant(
@@ -998,28 +998,30 @@ class NPTNoseHooverState(MDState):
     the equations of motion.
 
     Attributes:
-        positions: Particle positions with shape [n_particles, n_dimensions]
-        momenta: Particle momenta with shape [n_particles, n_dimensions]
-        forces: Forces on particles with shape [n_particles, n_dimensions]
-        masses: Particle masses with shape [n_particles]
-        reference_box: Reference simulation cell matrix with shape
+        positions (torch.Tensor): Particle positions with shape [n_particles, n_dims]
+        momenta (torch.Tensor): Particle momenta with shape [n_particles, n_dims]
+        forces (torch.Tensor): Forces on particles with shape [n_particles, n_dims]
+        masses (torch.Tensor): Particle masses with shape [n_particles]
+        reference_box (torch.Tensor): Reference simulation cell matrix with shape
             [n_dimensions, n_dimensions]. Used to measure relative volume changes.
-        box_position: Logarithmic box coordinate. Scalar value representing
+        box_position (torch.Tensor): Logarithmic box coordinate. Scalar value representing
             (1/d)ln(V/V_0) where V is current volume and V_0 is reference volume.
-        box_momentum: Box momentum (velocity) conjugate to box_position.
+        box_momentum (torch.Tensor): Box momentum (velocity) conjugate to box_position.
             Scalar value controlling volume changes.
-        box_mass: Mass parameter for box dynamics. Controls coupling
+        box_mass (torch.Tensor): Mass parameter for box dynamics. Controls coupling
             between volume fluctuations and pressure.
-        barostat: Chain thermostat coupled to box dynamics for
+        barostat (NoseHooverChain): Chain thermostat coupled to box dynamics for
             pressure control
-        thermostat: Chain thermostat coupled to particle dynamics
+        thermostat (NoseHooverChain): Chain thermostat coupled to particle dynamics
             for temperature control
+        barostat_fns (NoseHooverChainFns): Functions for barostat chain updates
+        thermostat_fns (NoseHooverChainFns): Functions for thermostat chain updates
 
     Properties:
-        velocities: Particle velocities computed as momenta/masses.
-            Has shape [n_particles, n_dimensions]
-        box: Current simulation cell matrix derived from box_position.
-            Has shape [n_dimensions, n_dimensions]
+        velocities (torch.Tensor): Particle velocities computed as momenta
+            divided by masses. Shape: [n_particles, n_dimensions]
+        current_box (torch.Tensor): Current simulation cell matrix derived from
+            box_position. Shape: [n_dimensions, n_dimensions]
 
     Notes:
         - The box parameterization ensures volume positivity
@@ -1068,59 +1070,47 @@ class NPTNoseHooverState(MDState):
 
 
 def npt_nose_hoover(  # noqa: C901, PLR0915
-    positions: torch.Tensor,
-    cell: torch.Tensor,
-    pbc: bool,  # noqa: FBT001
+    *,
+    model: torch.nn.Module,
     kT: torch.Tensor,
     external_pressure: torch.Tensor,
-    model: torch.nn.Module,
     dt: torch.Tensor,
-    masses: torch.Tensor,
     chain_length: int = 3,
     chain_steps: int = 2,
     sy_steps: int = 3,
-    t_tau: torch.Tensor | None = None,
-    b_tau: torch.Tensor | None = None,
-    seed: int | None = None,
-    **extra_state_kwargs: Any,
-) -> NPTNoseHooverState:
-    """Initialize an NPT simulation state with Nose-Hoover chain thermostats.
+) -> tuple[
+    Callable[[BaseState | StateDict], NPTNoseHooverState],
+    Callable[[NPTNoseHooverState, torch.Tensor], NPTNoseHooverState],
+]:
+    """Create an NPT simulation with Nose-Hoover chain thermostats.
 
-    This function creates and initializes a complete NPTNoseHooverState by setting up
-    both temperature and pressure control via Nose-Hoover chains. The barostat chain
-    controls pressure through box dynamics while the thermostat chain maintains
-    constant temperature.
+    This function returns initialization and update functions for NPT molecular dynamics
+    with Nose-Hoover chain thermostats for temperature and pressure control.
 
     Args:
-        positions (torch.Tensor): Initial particle positions [n_particles, n_dimensions]
-        cell (torch.Tensor): Initial simulation box matrix [n_dimensions, n_dimensions]
-            or scalar for cubic box
-        pbc (bool): Whether to use periodic boundary conditions
+        model (torch.nn.Module): Model to compute forces and energies
         kT (torch.Tensor): Target temperature in energy units
         external_pressure (torch.Tensor): Target external pressure
-        model (torch.nn.Module): Model to compute forces
-        dt (float): Integration timestep
-        masses (torch.Tensor): Particle masses
-        chain_length (int): Length of the Nose-Hoover chain
-        chain_steps (int): Number of steps in the Nose-Hoover chain
-        sy_steps (int): Number of steps in the Nose-Hoover chain
-        t_tau (float): Thermostat relaxation time
-        b_tau (float): Barostat relaxation time
-        seed (int): Random seed for reproducibility
-        **extra_state_kwargs: Additional arguments passed to force and stress functions
+        dt (torch.Tensor): Integration timestep
+        chain_length (int, optional): Length of Nose-Hoover chains. Defaults to 3.
+        chain_steps (int, optional): Chain integration substeps. Defaults to 2.
+        sy_steps (int, optional): Suzuki-Yoshida integration order. Defaults to 3.
 
     Returns:
-        NPTNoseHooverState: Initialized state ready for NPT integration
+        tuple:
+            - Callable[[BaseState | StateDict], NPTNoseHooverState]: Initialization
+              function
+            - Callable[[NPTNoseHooverState, torch.Tensor], NPTNoseHooverState]: Update
+              function
 
     Notes:
-        - Barostat uses longer relaxation time (1000*dt) for stable pressure control
-        - Thermostat uses shorter relaxation time (100*dt) for temperature control
-        - Box position is parameterized as (1/d)ln(V/V_0)
+        - Uses Nose-Hoover chains for both temperature and pressure control
+        - Implements symplectic integration with Suzuki-Yoshida decomposition
+        - Box dynamics use logarithmic coordinates for volume updates
+        - Conserves extended system Hamiltonian
     """
-    # Get system dimensions and device
-    n_particles, dim = positions.shape
-    device = positions.device
-    dtype = positions.dtype
+    device = model.device
+    dtype = model.dtype
 
     def _npt_box_info(
         state: NPTNoseHooverState,
@@ -1351,9 +1341,6 @@ def npt_nose_hoover(  # noqa: C901, PLR0915
         # NOTE on Stress tensor vs Pressure tensor convention
         # Be careful about the sign of the stress tensor!
         # torch-sim models return a stress tensor as 1/volume * dU/de_ij
-        # To get the pressure right that's usually -1/(volume d) * trace(dU/de_ij)
-        # But the ML models already divide by the volume but not the dimension
-        # So we need to divide by the dimension.
         # The standard definition can be found here.
         # https://matsci.org/t/stress-and-pressure/15195/5
         # https://docs.lammps.org/compute_pressure.html
@@ -1467,7 +1454,132 @@ def npt_nose_hoover(  # noqa: C901, PLR0915
         state.box_mass = box_mass
         return state
 
-    def npt_nose_hoover_step(
+    def npt_nose_hoover_init(
+        state: BaseState | StateDict,
+        kT: torch.Tensor = kT,
+        t_tau: torch.Tensor | None = None,
+        b_tau: torch.Tensor | None = None,
+        seed: int | None = None,
+        **extra_state_kwargs: Any,
+    ) -> NPTNoseHooverState:
+        """Initialize the NPT Nose-Hoover state.
+
+        This function initializes a state for NPT molecular dynamics with Nose-Hoover
+        chain thermostats for both temperature and pressure control. It sets up the
+        system with appropriate initial conditions including particle positions, momenta,
+        box variables, and thermostat chains.
+
+        Args:
+            state: Initial system state as BaseState or dict containing positions, masses,
+                cell, and PBC information
+            kT: Target temperature in energy units
+            t_tau: Thermostat relaxation time. Controls how quickly temperature
+                equilibrates. Defaults to 100*dt
+            b_tau: Barostat relaxation time. Controls how quickly pressure equilibrates.
+                Defaults to 1000*dt
+            seed: Random seed for momenta initialization. Used for reproducible runs
+            **extra_state_kwargs: Additional state variables like atomic_numbers or
+                pre-initialized momenta
+
+        Returns:
+            NPTNoseHooverState: Initialized state containing:
+                - Particle positions, momenta, forces
+                - Box position, momentum and mass
+                - Reference box matrix
+                - Thermostat and barostat chain variables
+                - System energy
+                - Other state variables (masses, PBC, etc.)
+
+        Notes:
+            - Uses separate Nose-Hoover chains for temperature and pressure control
+            - Box mass is set based on system size and barostat relaxation time
+            - Initial momenta are drawn from Maxwell-Boltzmann distribution if not
+              provided
+            - Box dynamics use logarithmic coordinates for volume updates
+        """
+        # Initialize the NPT Nose-Hoover state
+        # Thermostat relaxation time
+        if t_tau is None:
+            t_tau = 100 * dt
+
+        # Barostat relaxation time
+        if b_tau is None:
+            b_tau = 1000 * dt
+
+        # Setup thermostats with appropriate timescales
+        barostat_fns = construct_nose_hoover_chain(
+            dt, chain_length, chain_steps, sy_steps, b_tau
+        )
+        thermostat_fns = construct_nose_hoover_chain(
+            dt, chain_length, chain_steps, sy_steps, t_tau
+        )
+
+        if not isinstance(state, BaseState):
+            state = BaseState(**state)
+
+        dim, n_particles = state.positions.shape
+        atomic_numbers = extra_state_kwargs.get("atomic_numbers", state.atomic_numbers)
+
+        # Initialize box variables
+        box_position = torch.zeros((), device=device, dtype=dtype)
+        box_momentum = torch.zeros((), device=device, dtype=dtype)
+        box_mass = torch.tensor(
+            dim * (n_particles + 1) * kT * b_tau**2, device=device, dtype=dtype
+        )
+
+        # Calculate box kinetic energy
+        KE_box = kinetic_energy(box_momentum, box_mass)
+
+        # Handle scalar box input
+        if (torch.is_tensor(state.cell) and state.cell.ndim == 0) or isinstance(
+            state.cell, int | float
+        ):
+            state.cell = torch.eye(dim, device=device, dtype=dtype) * state.cell
+
+        # Get model output
+        model_output = model(
+            positions=state.positions,
+            cell=state.cell,
+            atomic_numbers=atomic_numbers,
+        )
+        forces = model_output["forces"]
+        energy = model_output["energy"]
+
+        # Create initial state
+        state = NPTNoseHooverState(
+            positions=state.positions,
+            momenta=None,
+            energy=energy,
+            forces=forces,
+            masses=state.masses,
+            atomic_numbers=atomic_numbers,
+            cell=state.cell,
+            pbc=state.pbc,
+            reference_box=state.cell,
+            box_position=box_position,
+            box_momentum=box_momentum,
+            box_mass=box_mass,
+            barostat=barostat_fns.initialize(1, KE_box, kT),
+            thermostat=None,
+            barostat_fns=barostat_fns,
+            thermostat_fns=thermostat_fns,
+        )
+
+        # Initialize momenta
+        momenta = (
+            extra_state_kwargs.get("momenta")
+            if extra_state_kwargs.get("momenta") is not None
+            else calculate_momenta(state.positions, state.masses, kT, device, dtype, seed)
+        )
+
+        # Initialize thermostat
+        state.momenta = momenta
+        KE = kinetic_energy(state.momenta, state.masses)
+        state.thermostat = thermostat_fns.initialize(state.positions.numel(), KE, kT)
+
+        return state
+
+    def npt_nose_hoover_update(
         state: NPTNoseHooverState,
         dt: torch.Tensor = dt,
         kT: torch.Tensor = kT,
@@ -1486,7 +1598,6 @@ def npt_nose_hoover(  # noqa: C901, PLR0915
             state (NPTNoseHooverState): Current system state
             dt (torch.Tensor): Integration timestep
             kT (torch.Tensor): Target temperature
-            model (torch.nn.Module): Model to compute energy, forces, and stresses
             external_pressure (torch.Tensor): Target external pressure
 
         Returns:
@@ -1532,79 +1643,7 @@ def npt_nose_hoover(  # noqa: C901, PLR0915
         )
         return state
 
-    # Initialize the NPT Nose-Hoover state
-    # Thermostat relaxation time
-    if t_tau is None:
-        t_tau = 100 * dt
-
-    # Barostat relaxation time
-    if b_tau is None:
-        b_tau = 1000 * dt
-
-    # Setup thermostats with appropriate timescales
-    barostat_fns = construct_nose_hoover_chain(
-        dt, chain_length, chain_steps, sy_steps, b_tau
-    )
-    thermostat_fns = construct_nose_hoover_chain(
-        dt, chain_length, chain_steps, sy_steps, t_tau
-    )
-
-    # Initialize box variables
-    box_position = torch.zeros((), device=device, dtype=dtype)
-    box_momentum = torch.zeros((), device=device, dtype=dtype)
-    box_mass = torch.tensor(
-        dim * (n_particles + 1) * kT * b_tau**2, device=device, dtype=dtype
-    )
-
-    # Calculate box kinetic energy
-    KE_box = kinetic_energy(box_momentum, box_mass)
-
-    # Handle scalar box input
-    if (torch.is_tensor(cell) and cell.ndim == 0) or isinstance(cell, int | float):
-        cell = torch.eye(dim, device=device, dtype=dtype) * cell
-
-    # Get model output
-    model_output = model(
-        positions=positions,
-        cell=cell,
-        atomic_numbers=extra_state_kwargs.get("atomic_numbers"),
-    )
-    forces = model_output["forces"]
-    energy = model_output["energy"]
-
-    # Create initial state
-    state = NPTNoseHooverState(
-        positions=positions,
-        momenta=None,
-        energy=energy,
-        forces=forces,
-        masses=masses,
-        atomic_numbers=extra_state_kwargs.get("atomic_numbers"),
-        cell=cell,
-        pbc=pbc,
-        reference_box=cell,
-        box_position=box_position,
-        box_momentum=box_momentum,
-        box_mass=box_mass,
-        barostat=barostat_fns.initialize(1, KE_box, kT),
-        thermostat=None,
-        barostat_fns=barostat_fns,
-        thermostat_fns=thermostat_fns,
-    )
-
-    # Initialize momenta
-    momenta = (
-        extra_state_kwargs.get("momenta")
-        if extra_state_kwargs.get("momenta") is not None
-        else calculate_momenta(positions, masses, kT, device, dtype, seed)
-    )
-
-    # Initialize thermostat
-    state.momenta = momenta
-    KE = kinetic_energy(state.momenta, state.masses)
-    state.thermostat = thermostat_fns.initialize(positions.numel(), KE, kT)
-
-    return state, npt_nose_hoover_step
+    return npt_nose_hoover_init, npt_nose_hoover_update
 
 
 def npt_nose_hoover_invariant(
@@ -1627,13 +1666,11 @@ def npt_nose_hoover_invariant(
     - Box kinetic energy
 
     Args:
-        energy: Energy of the system.
         state: Current state of the NPT simulation system.
             Must contain position, momentum, box, box_momentum, box_mass, thermostat,
             and barostat.
         external_pressure: Target external pressure of the system.
         kT: Target thermal energy (Boltzmann constant x temperature).
-        **kwargs: Additional keyword arguments passed to energy_fn.
 
     Returns:
         torch.Tensor: The conserved quantity (extended Hamiltonian) of the NPT system.
