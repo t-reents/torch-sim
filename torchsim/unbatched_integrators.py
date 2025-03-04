@@ -209,6 +209,8 @@ def velocity_verlet(state: MDState, dt: torch.Tensor, model: torch.nn.Module) ->
 def nve(
     *,
     model: torch.nn.Module,
+    dt: torch.Tensor,
+    kT: torch.Tensor,
 ) -> tuple[
     Callable[[BaseState | dict, torch.Tensor], MDState],
     Callable[[MDState, torch.Tensor], MDState],
@@ -221,12 +223,15 @@ def nve(
 
     Args:
         model: Neural network model that computes energies and forces
-        extra_state_kwargs: Additional state arguments
+        dt: Integration timestep
+        kT: Temperature in energy units for initializing momenta
 
     Returns:
         tuple:
-            - callable: Function to initialize the MDState from input data and kT
-            - callable: Update function that evolves system by one timestep
+            - Callable[[BaseState | StateDict, torch.Tensor], MDState]: Function to
+              initialize the MDState from input data and kT
+            - Callable[[MDState, torch.Tensor], MDState]: Update function that evolves
+              system by one timestep
 
     Notes:
         - Uses velocity Verlet algorithm for time-reversible integration
@@ -234,17 +239,19 @@ def nve(
         - Initial velocities sampled from Maxwell-Boltzmann distribution
         - Model must return dict with 'energy' and 'forces' keys
     """
+    device = model.device
+    dtype = model.dtype
 
     def nve_init(
-        input_state: BaseState | StateDict,
-        kT: torch.Tensor,
+        state: BaseState | StateDict,
+        kT: torch.Tensor = kT,
         seed: int | None = None,
         **extra_state_kwargs: Any,
     ) -> MDState:
         """Initialize an NVE state from input data.
 
         Args:
-            input_state: Either a BaseState object or a dictionary containing positions,
+            state: Either a BaseState object or a dictionary containing positions,
                 masses, cell, pbc
             kT: Temperature in energy units for initializing momenta
             seed: Random seed for reproducibility
@@ -253,12 +260,9 @@ def nve(
         Returns:
             MDState: Initialized state for NVE integration
         """
-        device = model.device
-        dtype = model.dtype
-
         # Extract required data from input
-        if not isinstance(input_state, BaseState):
-            state = BaseState(**input_state)
+        if not isinstance(state, BaseState):
+            state = BaseState(**state)
 
         # Override with extra_state_kwargs if provided
         atomic_numbers = extra_state_kwargs.get("atomic_numbers", state.atomic_numbers)
@@ -287,7 +291,7 @@ def nve(
         )
         return initial_state  # noqa: RET504
 
-    def nve_update(state: MDState, dt: torch.Tensor, **_) -> MDState:
+    def nve_update(state: MDState, dt: torch.Tensor = dt, **_) -> MDState:
         """Perform one complete NVE (microcanonical) integration step.
 
         This function implements the velocity Verlet algorithm for NVE dynamics,
@@ -328,17 +332,14 @@ def nve(
 
 def nvt_langevin(
     *,
-    positions: torch.Tensor,
-    masses: torch.Tensor,
-    cell: torch.Tensor,
-    pbc: bool,
     model: torch.nn.Module,
     dt: torch.Tensor,
     kT: torch.Tensor,
     gamma: torch.Tensor | None = None,
-    seed: int | None = None,
-    **extra_state_kwargs: Any,
-) -> tuple[MDState, Callable[[MDState, torch.Tensor], MDState]]:
+) -> tuple[
+    Callable[[BaseState | StateDict, torch.Tensor], MDState],
+    Callable[[MDState, torch.Tensor], MDState],
+]:
     """Initialize and return an NVT (canonical) integrator using Langevin dynamics.
 
     This function sets up integration in the NVT ensemble, where particle number (N),
@@ -346,38 +347,73 @@ def nvt_langevin(
     and an update function for time evolution.
 
     Args:
-        positions: Initial particle positions [n_particles, n_dimensions]
-        masses: Particle masses [n_particles]
-        cell: Simulation cell matrix [n_dimensions, n_dimensions]
-        pbc: Whether to use periodic boundary conditions
         model: Neural network model that computes energies and forces
         dt: Integration timestep
         kT: Target temperature in energy units
-        gamma: Friction coefficient for Langevin thermostat
-        seed: Random seed for reproducibility
-        extra_state_kwargs: Additional state arguments
+        gamma: Friction coefficient for Langevin thermostat (default: 1/(100*dt))
 
     Returns:
         tuple:
-            - MDState: Initial system state with thermal velocities
-            - Callable[[MDState, torch.Tensor], MDState]: Update function for nvt langevin
+            - Callable[[BaseState | StateDict, torch.Tensor], MDState]: Function to
+              initialize the MDState from input data and kT
+            - Callable[[MDState, torch.Tensor], MDState]: Update function that evolves
+              system by one timestep
 
     Notes:
         - Uses BAOAB splitting scheme for Langevin dynamics
         - Preserves detailed balance for correct NVT sampling
         - Handles periodic boundary conditions if enabled in state
     """
-    device = positions.device
-    dtype = positions.dtype
+    device = model.device
+    dtype = model.dtype
     gamma = gamma or 1 / (100 * dt)
 
-    # Convert scalar parameters to tensors if needed
-    if not isinstance(gamma, torch.Tensor):
-        gamma = torch.tensor(gamma, device=device, dtype=dtype)
-    if not isinstance(dt, torch.Tensor):
-        dt = torch.tensor(dt, device=device, dtype=dtype)
-    if not isinstance(kT, torch.Tensor):
-        kT = torch.tensor(kT, device=device, dtype=dtype)
+    def langevin_init(
+        state: BaseState | StateDict,
+        kT: torch.Tensor = kT,
+        seed: int | None = None,
+        **extra_state_kwargs: Any,
+    ) -> MDState:
+        """Initialize an NVT Langevin state from input data.
+
+        Args:
+            state: Either a BaseState object or a dictionary containing positions,
+                masses, cell, pbc
+            kT: Temperature in energy units for initializing momenta
+            seed: Random seed for reproducibility
+            **extra_state_kwargs: Additional state arguments
+
+        Returns:
+            MDState: Initialized state for NVT Langevin integration
+        """
+        if not isinstance(state, BaseState):
+            state = BaseState(**state)
+
+        atomic_numbers = extra_state_kwargs.get("atomic_numbers", state.atomic_numbers)
+
+        model_output = model(
+            positions=state.positions,
+            cell=state.cell,
+            atomic_numbers=atomic_numbers,
+        )
+
+        momenta = (
+            extra_state_kwargs.get("momenta")
+            if extra_state_kwargs.get("momenta") is not None
+            else calculate_momenta(state.positions, state.masses, kT, device, dtype, seed)
+        )
+
+        initial_state = MDState(
+            positions=state.positions,
+            momenta=momenta,
+            energy=model_output["energy"],
+            forces=model_output["forces"],
+            masses=state.masses,
+            cell=state.cell,
+            pbc=state.pbc,
+            atomic_numbers=atomic_numbers,
+        )
+        return initial_state  # noqa: RET504
 
     def langevin_update(
         state: MDState,
@@ -399,11 +435,11 @@ def nvt_langevin(
         Args:
             state: Current system state containing positions, momenta, forces
             dt: Integration timestep
-            kT: Target temperature (energy units)
+            kT: Target temperature in energy units
             gamma: Friction coefficient for Langevin thermostat
 
         Returns:
-            Updated state after one complete Langevin step
+            MDState: Updated state after one complete Langevin step
         """
         state = momentum_step(state, dt / 2)
         state = position_step(state, dt / 2)
@@ -420,31 +456,7 @@ def nvt_langevin(
 
         return momentum_step(state, dt / 2)
 
-    # Initialize the NVT langevin state
-    model_output = model(
-        positions=positions,
-        cell=cell,
-        atomic_numbers=extra_state_kwargs.get("atomic_numbers"),
-    )
-
-    momenta = (
-        extra_state_kwargs.get("momenta")
-        if extra_state_kwargs.get("momenta") is not None
-        else calculate_momenta(positions, masses, kT, device, dtype, seed)
-    )
-
-    initial_state = MDState(
-        positions=positions,
-        momenta=momenta,
-        energy=model_output["energy"],
-        forces=model_output["forces"],
-        masses=masses,
-        cell=cell,
-        pbc=pbc,
-        atomic_numbers=extra_state_kwargs.get("atomic_numbers"),
-    )
-
-    return initial_state, langevin_update
+    return langevin_init, langevin_update
 
 
 @dataclass
