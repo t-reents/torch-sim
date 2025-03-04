@@ -204,7 +204,10 @@ def velocity_verlet(state: MDState, dt: torch.Tensor, model: torch.nn.Module) ->
 def nve(
     *,
     model: torch.nn.Module,
-) -> tuple[Callable[[BaseState | dict, torch.Tensor], MDState], Callable[[MDState, torch.Tensor], MDState]]:
+) -> tuple[
+    Callable[[BaseState | dict, torch.Tensor], MDState],
+    Callable[[MDState, torch.Tensor], MDState],
+]:
     """Initialize and return an NVE (microcanonical) integrator.
 
     This function sets up integration in the NVE ensemble, where particle number (N),
@@ -217,7 +220,7 @@ def nve(
 
     Returns:
         tuple:
-            - MDState: Initial system state with thermal velocities
+            - callable: Function to initialize the MDState from input data and kT
             - callable: Update function that evolves system by one timestep
 
     Notes:
@@ -227,20 +230,27 @@ def nve(
         - Model must return dict with 'energy' and 'forces' keys
     """
 
-    def nve_init(input_data: BaseState | dict, kT: torch.Tensor, **extra_state_kwargs: Any):
+    def nve_init(
+        input_data: BaseState | dict,
+        kT: torch.Tensor,
+        seed: int | None = None,
+        **extra_state_kwargs: Any,
+    ) -> MDState:
         """Initialize an NVE state from input data.
-        
+
         Args:
-            input_data: Either a BaseState object or a dictionary containing positions, masses, cell, pbc
+            input_data: Either a BaseState object or a dictionary containing positions,
+                masses, cell, pbc
             kT: Temperature in energy units for initializing momenta
+            seed: Random seed for reproducibility
             **extra_state_kwargs: Additional state arguments
-            
+
         Returns:
             MDState: Initialized state for NVE integration
         """
         device = model.device
         dtype = model.dtype
-        
+
         # Extract required data from input
         if isinstance(input_data, BaseState):
             positions = input_data.positions
@@ -254,7 +264,7 @@ def nve(
             cell = input_data["cell"]
             pbc = input_data["pbc"]
             atomic_numbers = input_data.get("atomic_numbers")
-            
+
         # Override with extra_state_kwargs if provided
         atomic_numbers = extra_state_kwargs.get("atomic_numbers", atomic_numbers)
 
@@ -267,7 +277,7 @@ def nve(
         momenta = (
             extra_state_kwargs.get("momenta")
             if extra_state_kwargs.get("momenta") is not None
-            else calculate_momenta(positions, masses, kT, device, dtype)
+            else calculate_momenta(positions, masses, kT, device, dtype, seed)
         )
 
         initial_state = MDState(
@@ -280,7 +290,7 @@ def nve(
             pbc=pbc,
             atomic_numbers=atomic_numbers,
         )
-        return initial_state
+        return initial_state  # noqa: RET504
 
     def nve_update(state: MDState, dt: torch.Tensor, **_) -> MDState:
         """Perform one complete NVE (microcanonical) integration step.

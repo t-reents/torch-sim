@@ -10,7 +10,6 @@ from torchsim.unbatched_integrators import MDState, nve, nvt_langevin, nvt_nose_
 from torchsim.utils import calculate_momenta
 
 
-# skip all tests in this file for now
 pytest.skip(
     reason="Unbatched integrators deprecated, skipping integrator tests",
     allow_module_level=True,
@@ -23,12 +22,8 @@ def test_nve_integrator(si_base_state: BaseState, lj_calculator: Any) -> None:
     kT = torch.tensor(300.0)  # Temperature in K
     dt = torch.tensor(0.001)  # Small timestep for stability
 
-    state, update_fn = nve(
-        **asdict(si_base_state),
-        model=lj_calculator,
-        dt=dt,
-        kT=kT,
-    )
+    nve_init, nve_update = nve(model=lj_calculator)
+    state = nve_init(input_data=si_base_state, kT=kT)
 
     # Store initial energy
     initial_energy = state.energy + kinetic_energy(state.momenta, state.masses)
@@ -36,7 +31,7 @@ def test_nve_integrator(si_base_state: BaseState, lj_calculator: Any) -> None:
     # Run several steps
     energies = []
     for _ in range(100):
-        state = update_fn(state, dt)
+        state = nve_update(state, dt)
         total_energy = state.energy + kinetic_energy(state.momenta, state.masses)
         energies.append(total_energy)
 

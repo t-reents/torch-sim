@@ -261,19 +261,13 @@ def test_nve(
     kT = torch.tensor(300.0 / 11606, device=device, dtype=dtype)  # Room temperature
 
     # Initialize integrator
-    initial_state, update_fn = nve(
-        state=si_double_base_state,
-        model=lj_calculator,
-        dt=dt,
-        kT=kT,
-        seed=42,
-    )
+    nve_init, nve_update = nve(model=lj_calculator)
+    state = nve_init(input_data=si_double_base_state, kT=kT, seed=42)
 
     # Run dynamics for several steps
-    state = initial_state
     energies = []
     for _ in range(n_steps):
-        state = update_fn(state)
+        state = nve_update(state, dt)
 
         energies.append(state.energy)
 
@@ -300,16 +294,12 @@ def test_compare_single_vs_batched_integrators(
         kT = torch.tensor(300.0) / 11606  # Temperature in K
         dt = torch.tensor(0.001)  # Small timestep for stability
 
-        state, update_fn = nve(
-            state=state,
-            model=lj_calculator,
-            dt=dt,
-            kT=kT,
-        )
+        nve_init, nve_update = nve(model=lj_calculator)
+        state = nve_init(input_data=state, kT=kT, seed=42)
         state.momenta = torch.zeros_like(state.momenta)
 
         for _ in range(100):
-            state = update_fn(state, dt)
+            state = nve_update(state, dt)
 
         final_states[state_name] = state
 

@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 import torch
 
@@ -210,12 +211,12 @@ def stochastic_step(
 
 
 def nve(
-    state: BaseState,
+    *,
     model: torch.nn.Module,
-    dt: torch.Tensor,
-    kT: torch.Tensor,
-    seed: int | None = None,
-) -> tuple[MDState, Callable[[MDState, torch.Tensor], MDState]]:
+) -> tuple[
+    Callable[[BaseState | dict, torch.Tensor], MDState],
+    Callable[[MDState, torch.Tensor], MDState],
+]:
     """Initialize and return an NVE (microcanonical) integrator.
 
     This function sets up integration in the NVE ensemble, where particle number (N),
@@ -223,15 +224,11 @@ def nve(
     and an update function for time evolution.
 
     Args:
-        state: Initial system state containing positions, masses, cell, etc.
         model: Neural network model that computes energies and forces
-        dt: Integration timestep
-        kT: Temperature for initializing thermal velocities
-        seed: Random seed for reproducibility
 
     Returns:
         tuple:
-            - MDState: Initial system state with thermal velocities
+            - callable: Function to initialize the MDState from input data and kT
             - callable: Update function that evolves system by one timestep
 
     Notes:
@@ -241,7 +238,71 @@ def nve(
         - Model must return dict with 'energy' and 'forces' keys
     """
 
-    def nve_update(state: MDState, dt: torch.Tensor = dt, **_) -> MDState:
+    def nve_init(
+        input_data: BaseState | dict,
+        kT: torch.Tensor,
+        seed: int | None = None,
+        **extra_state_kwargs: Any,
+    ) -> MDState:
+        """Initialize an NVE state from input data.
+
+        Args:
+            input_data: Either a BaseState object or a dictionary containing positions,
+                masses, cell, pbc
+            kT: Temperature in energy units for initializing momenta
+            seed: Random seed for reproducibility
+            **extra_state_kwargs: Additional state arguments
+
+        Returns:
+            MDState: Initialized state for NVE integration
+        """
+        # Extract required data from input
+        if isinstance(input_data, BaseState):
+            positions = input_data.positions
+            masses = input_data.masses
+            cell = input_data.cell
+            pbc = input_data.pbc
+            batch = getattr(input_data, "batch", None)
+            atomic_numbers = input_data.atomic_numbers
+        else:
+            positions = input_data["positions"]
+            masses = input_data["masses"]
+            cell = input_data["cell"]
+            pbc = input_data["pbc"]
+            batch = input_data.get("batch")
+            atomic_numbers = input_data.get("atomic_numbers")
+
+        # Override with extra_state_kwargs if provided
+        atomic_numbers = extra_state_kwargs.get("atomic_numbers", atomic_numbers)
+        batch = extra_state_kwargs.get("batch", batch)
+
+        model_output = model(
+            positions=positions,
+            cell=cell,
+            batch=batch,
+            atomic_numbers=atomic_numbers,
+        )
+
+        momenta = (
+            extra_state_kwargs.get("momenta")
+            if extra_state_kwargs.get("momenta") is not None
+            else calculate_momenta(positions, masses, kT, seed)
+        )
+
+        initial_state = MDState(
+            positions=positions,
+            momenta=momenta,
+            energy=model_output["energy"],
+            forces=model_output["forces"],
+            masses=masses,
+            cell=cell,
+            pbc=pbc,
+            batch=batch,
+            atomic_numbers=atomic_numbers,
+        )
+        return initial_state  # noqa: RET504
+
+    def nve_update(state: MDState, dt: torch.Tensor, **_) -> MDState:
         """Perform one complete NVE (microcanonical) integration step.
 
         This function implements the velocity Verlet algorithm for NVE dynamics,
@@ -278,34 +339,7 @@ def nve(
 
         return momentum_step(state, dt / 2)
 
-    model_output = model(
-        positions=state.positions,
-        cell=state.cell,
-        batch=state.batch,
-        atomic_numbers=state.atomic_numbers,
-    )
-
-    momenta = (
-        state.momenta
-        if getattr(state, "momenta", None) is not None
-        else calculate_momenta(state.positions, state.masses, kT, seed)
-    )
-
-    # TODO: could consider adding a to_base_state method to BaseState, would
-    # clean this up slightly
-    initial_state = MDState(
-        positions=state.positions,
-        masses=state.masses,
-        cell=state.cell,
-        pbc=state.pbc,
-        batch=state.batch,
-        atomic_numbers=state.atomic_numbers,
-        momenta=momenta,
-        energy=model_output["energy"],
-        forces=model_output["forces"],
-    )
-
-    return initial_state, nve_update
+    return nve_init, nve_update
 
 
 def nvt_langevin(
