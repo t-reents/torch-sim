@@ -136,11 +136,11 @@ def optimize(
         )
     state: BaseState = initialize_state(system, model.device, model.dtype)
 
-    state, update_fn = optimizer(
-        state=state,
+    init_fn, update_fn = optimizer(
         model=model,
         **optimizer_kwargs,
     )
+    state = init_fn(state)
 
     step: int = 1
     last_energy = state.energy + 1
