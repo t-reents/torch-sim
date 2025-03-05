@@ -6,7 +6,8 @@ from ase.build import bulk
 # Import torchsim models and optimizers
 from torchsim.models.mace import UnbatchedMaceModel
 from torchsim.neighbors import vesin_nl_ts
-from torchsim.unbatched_optimizers import fire
+from torchsim.unbatched_optimizers import unit_cell_fire
+from torchsim.units import UnitConversion
 
 from mace.calculators.foundations_models import mace_mp
 
@@ -29,10 +30,11 @@ loaded_model = mace_mp(
 
 PERIODIC = True
 
-# Create diamond cubic Silicon with random displacements
+# Create diamond cubic Silicon with random displacements and a 5% volume compression
 rng = np.random.default_rng()
 si_dc = bulk("Si", "diamond", a=5.43, cubic=True).repeat((2, 2, 2))
 si_dc.positions = si_dc.positions + 0.2 * rng.standard_normal(si_dc.positions.shape)
+si_dc.cell = si_dc.cell.array * 0.95
 
 # Prepare input tensors
 positions = torch.tensor(si_dc.positions, device=device, dtype=dtype)
@@ -47,7 +49,7 @@ model = UnbatchedMaceModel(
     neighbor_list_fn=vesin_nl_ts,
     periodic=PERIODIC,
     compute_force=True,
-    compute_stress=False,
+    compute_stress=True,
     dtype=dtype,
     enable_cueq=False,
 )
@@ -63,7 +65,7 @@ state = {
     "atomic_numbers": atomic_numbers,
 }
 # Initialize FIRE optimizer for structural relaxation
-fire_init, fire_update = fire(
+fire_init, fire_update = unit_cell_fire(
     model=model,
 )
 
@@ -72,10 +74,21 @@ state = fire_init(state=state)
 # Run optimization loop
 for step in range(1_000):
     if step % 10 == 0:
-        print(f"{step=}: Total energy: {state.energy.item()} eV")
+        PE = state.energy.item()
+        P = torch.trace(state.stress).item() / 3.0 * UnitConversion.eV_per_Ang3_to_GPa
+        print(f"{step=}: Total energy: {PE} eV, pressure: {P} GPa")
     state = fire_update(state)
 
 print(f"Initial energy: {results['energy'].item()} eV")
 print(f"Final energy: {state.energy.item()} eV")
+
+
 print(f"Initial max force: {torch.max(torch.abs(results['forces'])).item()} eV/Å")
 print(f"Final max force: {torch.max(torch.abs(state.forces)).item()} eV/Å")
+
+print(
+    f"Initial pressure: {torch.trace(results['stress']).item() / 3.0 * UnitConversion.eV_per_Ang3_to_GPa} GPa"
+)
+print(
+    f"Final pressure: {torch.trace(state.stress).item() / 3.0 * UnitConversion.eV_per_Ang3_to_GPa} GPa"
+)
