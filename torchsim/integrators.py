@@ -11,7 +11,8 @@ from torchsim.transforms import pbc_wrap_batched
 
 
 StateDict = dict[
-    Literal["positions", "masses", "cell", "pbc", "atomic_numbers", "batch"], torch.Tensor
+    Literal["positions", "masses", "cell", "pbc", "atomic_numbers", "batch"],
+    torch.Tensor,
 ]
 
 

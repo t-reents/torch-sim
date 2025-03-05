@@ -124,8 +124,6 @@ def metropolis_criterion(
     random_values = torch.rand(
         p_acceptance.shape, generator=generator, device=p_acceptance.device
     )
-    print("Delta E: ", delta_e)
-    print("P acceptance: ", p_acceptance)
 
     # Accept if random value < acceptance probability
     return random_values < p_acceptance
