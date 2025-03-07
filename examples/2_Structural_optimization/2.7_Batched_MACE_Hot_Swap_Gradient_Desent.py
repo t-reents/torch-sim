@@ -5,6 +5,9 @@
 #     "mace-torch>=0.3.10",
 # ]
 # ///
+
+import os
+
 import numpy as np
 import torch
 from ase.build import bulk
@@ -18,7 +21,7 @@ from torchsim.units import UnitConversion
 
 
 # Set device and data type
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = "cuda" if torch.cuda.is_available() else "cpu"
 dtype = torch.float32
 
 # Option 1: Load the raw model from the downloaded model
@@ -34,9 +37,12 @@ loaded_model = mace_mp(
 # MODEL_PATH = "../../../checkpoints/MACE/mace-mpa-0-medium.model"
 # loaded_model = torch.load(MODEL_PATH, map_location=device)
 
+# Number of steps to run
+N_steps = 10 if os.getenv("CI") else 500
+
 PERIODIC = True
 
-rng = np.random.default_rng()
+rng = np.random.default_rng(seed=0)
 
 # Create diamond cubic Silicon
 si_dc = bulk("Si", "diamond", a=5.43, cubic=True).repeat((2, 2, 2))
@@ -94,7 +100,7 @@ results = batched_model(
 total_structures = 3
 current_structures = 2
 # Run optimization for a few steps
-for step in range(200):
+for step in range(N_steps):
     # Calculate force norms for each batch and check if they're converged
     force_norms = torch.stack(
         [batch_state.forces[batch_state.batch == i].norm(dim=-1).max() for i in range(2)]

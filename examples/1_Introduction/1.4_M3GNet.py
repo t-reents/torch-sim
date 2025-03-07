@@ -2,10 +2,12 @@
 
 # /// script
 # dependencies = [
-#     "mattersim>=1.1.2",
 #     "numpy<2",
+#     "mattersim>=1.1.2",
+#
 # ]
 # ///
+
 import torch
 from ase.build import bulk
 
@@ -15,7 +17,7 @@ from torchsim.models.mattersim.utils.build import batch_to_dict, build_dataloade
 
 
 # Set device and data type
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = "cuda" if torch.cuda.is_available() else "cpu"
 dtype = torch.float32
 
 # Path to the model checkpoint

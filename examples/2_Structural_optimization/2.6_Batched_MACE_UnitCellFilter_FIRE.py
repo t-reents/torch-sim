@@ -6,6 +6,8 @@
 # ]
 # ///
 
+import os
+
 import numpy as np
 import torch
 from ase.build import bulk
@@ -19,7 +21,7 @@ from torchsim.units import UnitConversion
 
 
 # Set device and data type
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = "cuda" if torch.cuda.is_available() else "cpu"
 dtype = torch.float32
 
 # Option 1: Load the raw model from the downloaded model
@@ -35,9 +37,12 @@ loaded_model = mace_mp(
 # MODEL_PATH = "../../../checkpoints/MACE/mace-mpa-0-medium.model"
 # loaded_model = torch.load(MODEL_PATH, map_location=device)
 
+# Number of steps to run
+N_steps = 10 if os.getenv("CI") else 500
+
 # Set random seed for reproducibility
 PERIODIC = True
-rng = np.random.default_rng()
+rng = np.random.default_rng(seed=0)
 
 # Create diamond cubic Silicon
 si_dc = bulk("Si", "diamond", a=5.21, cubic=True).repeat((2, 2, 2))
@@ -95,7 +100,7 @@ state = fire_init(state)
 
 # Run optimization for a few steps
 print("\nRunning batched unit cell gradient descent:")
-for step in range(200):
+for step in range(N_steps):
     P1 = torch.trace(state.stress[0]) * UnitConversion.eV_per_Ang3_to_GPa / 3
     P2 = torch.trace(state.stress[1]) * UnitConversion.eV_per_Ang3_to_GPa / 3
     P3 = torch.trace(state.stress[2]) * UnitConversion.eV_per_Ang3_to_GPa / 3

@@ -1,5 +1,7 @@
 """Lennard-Jones simulation in NPT ensemble using Nose-Hoover chain."""
 
+import os
+
 import torch
 
 from torchsim.models.lennard_jones import UnbatchedLennardJonesModel
@@ -9,7 +11,7 @@ from torchsim.units import MetalUnits as Units
 
 
 # Set up the device and data type
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = "cuda" if torch.cuda.is_available() else "cpu"
 dtype = torch.float32
 
 # Set random seed and deterministic behavior for reproducibility
@@ -22,6 +24,9 @@ torch.backends.cudnn.benchmark = False
 # Set up the random number generator
 generator = torch.Generator(device=device)
 generator.manual_seed(42)  # For reproducibility
+
+# Number of steps to run
+N_steps = 100 if os.getenv("CI") else 10_000
 
 # Create face-centered cubic (FCC) Argon
 # 5.26 Å is a typical lattice constant for Ar
@@ -86,7 +91,7 @@ model = UnbatchedLennardJonesModel(
 results = model(positions=positions, cell=cell, atomic_numbers=atomic_numbers)
 
 dt = 0.001 * Units.time  # Time step (1 ps)
-kT = 200 * Units.temperature  # Temperature (200 K)  # noqa: N816
+kT = 200 * Units.temperature  # Temperature (200 K)
 target_pressure = 0 * Units.pressure  # Target pressure (10 kbar)
 
 state = {
@@ -120,7 +125,7 @@ def get_pressure(
 
 
 # Run the simulation
-for step in range(10_000):
+for step in range(N_steps):
     if step % 50 == 0:
         temp = temperature(masses=state.masses, momenta=state.momenta) / Units.temperature
         invariant = npt_nose_hoover_invariant(

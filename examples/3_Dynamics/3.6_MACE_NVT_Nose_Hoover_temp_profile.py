@@ -10,6 +10,8 @@ temperature profile.
 # ]
 # ///
 
+import os
+
 import numpy as np
 import torch
 from ase.build import bulk
@@ -23,7 +25,7 @@ from torchsim.unbatched_integrators import nvt_nose_hoover, nvt_nose_hoover_inva
 from torchsim.units import MetalUnits as Units
 
 
-def get_kT(  # noqa: N802
+def get_kT(
     step: int,
     n_steps_initial: int,
     n_steps_ramp_up: int,
@@ -71,7 +73,7 @@ def get_kT(  # noqa: N802
 
 
 # Set device and data type
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = "cuda" if torch.cuda.is_available() else "cpu"
 dtype = torch.float32
 
 # Model configuration
@@ -97,11 +99,11 @@ cooling_temp = 300
 annealing_temp = 300
 
 # Step counts for different phases
-n_steps_initial = 200
-n_steps_ramp_up = 200
-n_steps_melt = 200
-n_steps_ramp_down = 200
-n_steps_anneal = 200
+n_steps_initial = 20 if os.getenv("CI") else 200
+n_steps_ramp_up = 20 if os.getenv("CI") else 200
+n_steps_melt = 20 if os.getenv("CI") else 200
+n_steps_ramp_down = 20 if os.getenv("CI") else 200
+n_steps_anneal = 20 if os.getenv("CI") else 200
 
 n_steps = (
     n_steps_initial + n_steps_ramp_up + n_steps_melt + n_steps_ramp_down + n_steps_anneal
@@ -146,7 +148,7 @@ results = model(positions=positions, cell=cell, atomic_numbers=atomic_numbers)
 
 # Set up simulation parameters
 dt = 0.002 * Units.time
-kT = init_temp * Units.temperature  # noqa: N816
+kT = init_temp * Units.temperature
 
 state = {
     "positions": positions,

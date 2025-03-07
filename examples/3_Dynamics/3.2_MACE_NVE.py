@@ -6,6 +6,7 @@
 # ]
 # ///
 
+import os
 import time
 
 import torch
@@ -20,7 +21,7 @@ from torchsim.units import MetalUnits as Units
 
 
 # Set device and data type
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = "cuda" if torch.cuda.is_available() else "cpu"
 dtype = torch.float32
 
 # Option 1: Load the raw model from the downloaded model
@@ -37,6 +38,9 @@ loaded_model = mace_mp(
 # loaded_model = torch.load(MODEL_PATH, map_location=device)
 
 PERIODIC = True
+
+# Number of steps to run
+N_steps = 20 if os.getenv("CI") else 2_000
 
 # Create diamond cubic Silicon
 si_dc = bulk("Si", "diamond", a=5.43, cubic=True).repeat((2, 2, 2))
@@ -63,7 +67,7 @@ model = UnbatchedMaceModel(
 results = model(positions=positions, cell=cell, atomic_numbers=atomic_numbers)
 
 # Setup NVE MD simulation parameters
-kT = 1000 * Units.temperature  # Initial temperature (K)  # noqa: N816
+kT = 1000 * Units.temperature  # Initial temperature (K)
 dt = 0.002 * Units.time  # Timestep (ps)
 
 state = {
@@ -84,11 +88,11 @@ state = nve_init(state=state, seed=1)
 # Run MD simulation
 print("\nStarting NVE molecular dynamics simulation...")
 start_time = time.perf_counter()
-for step in range(200):
+for step in range(N_steps):
     total_energy = state.energy + kinetic_energy(
         masses=state.masses, momenta=state.momenta
     )
-    if step % 20 == 0:
+    if step % 10 == 0:
         print(f"Step {step}: Total energy: {total_energy.item():.4f} eV")
     state = nve_update(state=state, dt=dt)
 end_time = time.perf_counter()

@@ -1,21 +1,23 @@
+# ruff: noqa: E501
 """Minimal FairChem example demonstrating batching."""
 
 # /// script
 # dependencies = [
 #     "fairchem-core>=1.6",
-#     "torch-geometric>=2.6.1",
-#     "torch-scatter==2.1.2",
-#     "torch-sparse==0.6.18",
-#     "torch-cluster==1.6.3",
+#     "torch>=2.4.0,<2.5.0",
+# ]
+# extra_install = [
+#     "pip install torch_geometric pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-2.4.0+cpu.html"
 # ]
 # ///
+
 import torch
 from ase.build import bulk
 
 from torchsim.models.fairchem import FairChemModel
 
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = "cuda" if torch.cuda.is_available() else "cpu"
 dtype = torch.float32
 
 MODEL_PATH = "../../../checkpoints/FAIRCHEM/EquiformerV2-31M-S2EF-OC20-All+MD.pt"

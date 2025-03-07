@@ -6,6 +6,8 @@
 # ]
 # ///
 
+import os
+
 import numpy as np
 import torch
 from ase.build import bulk
@@ -17,7 +19,7 @@ from torchsim.unbatched_optimizers import fire
 
 
 # Set device and data type
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = "cuda" if torch.cuda.is_available() else "cpu"
 dtype = torch.float32
 
 # Option 1: Load the raw model from the downloaded model
@@ -33,10 +35,13 @@ loaded_model = mace_mp(
 # MODEL_PATH = "../../../checkpoints/MACE/mace-mpa-0-medium.model"
 # loaded_model = torch.load(MODEL_PATH, map_location=device)
 
+# Number of steps to run
+N_steps = 10 if os.getenv("CI") else 500
+
 PERIODIC = True
 
 # Create diamond cubic Silicon with random displacements
-rng = np.random.default_rng()
+rng = np.random.default_rng(seed=0)
 si_dc = bulk("Si", "diamond", a=5.43, cubic=True).repeat((2, 2, 2))
 si_dc.positions = si_dc.positions + 0.2 * rng.standard_normal(si_dc.positions.shape)
 
@@ -73,7 +78,7 @@ fire_init, fire_update = fire(model=model)
 state = fire_init(state=state)
 
 # Run optimization loop
-for step in range(200):
+for step in range(N_steps):
     if step % 10 == 0:
         print(f"{step=}: Total energy: {state.energy.item()} eV")
     state = fire_update(state)

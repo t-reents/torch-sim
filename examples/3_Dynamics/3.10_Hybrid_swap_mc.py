@@ -20,10 +20,10 @@ from torchsim.runners import structures_to_state
 from torchsim.units import MetalUnits
 
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = "cuda" if torch.cuda.is_available() else "cpu"
 dtype = torch.float64
 
-kT = 1000 * MetalUnits.temperature  # noqa: N816
+kT = 1000 * MetalUnits.temperature
 
 # Option 1: Load the raw model from the downloaded model
 mace_checkpoint_url = "https://github.com/ACEsuit/mace-mp/releases/download/mace_mpa_0/mace-mpa-0-medium.model"
@@ -42,7 +42,7 @@ model = MaceModel(
     model=loaded_model,
     device=device,
     dtype=dtype,
-    enable_cueq=True,
+    enable_cueq=False,
 )
 
 
@@ -77,10 +77,11 @@ class HybridSwapMCState(MDState):
     last_permutation: torch.Tensor
 
 
-md_state, nvt_step = nvt_langevin(state, model, dt=0.002, kT=kT, seed=42)
+nvt_init, nvt_step = nvt_langevin(model=model, dt=0.002, kT=kT)
+md_state = nvt_init(state, seed=42)
 
-swap_state, swap_step = swap_monte_carlo(md_state, model, kT=kT, seed=42)
-
+swap_init, swap_step = swap_monte_carlo(model=model, kT=kT, seed=42)
+swap_state = swap_init(md_state)
 hybrid_state = HybridSwapMCState(
     **vars(md_state),
     last_permutation=torch.zeros(
@@ -88,13 +89,12 @@ hybrid_state = HybridSwapMCState(
     ),
 )
 
-og_hybrid_state = hybrid_state.clone()
-
 generator = torch.Generator(device=device)
 generator.manual_seed(42)
 
-for i in range(100):
-    if i % 10 == 0:
+n_steps = 100
+for step in range(n_steps):
+    if step % 10 == 0:
         hybrid_state = swap_step(hybrid_state, kT=torch.tensor(kT), generator=generator)
     else:
         hybrid_state = nvt_step(hybrid_state, dt=torch.tensor(0.002), kT=torch.tensor(kT))

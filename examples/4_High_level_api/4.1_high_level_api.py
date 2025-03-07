@@ -9,6 +9,9 @@ criteria, and logging.
 # ]
 # ///
 
+import os
+
+import numpy as np
 import torch
 from ase.build import bulk
 from mace.calculators.foundations_models import mace_mp
@@ -17,7 +20,7 @@ from pymatgen.core import Structure
 from torchsim.integrators import nvt_langevin
 from torchsim.models.lennard_jones import LennardJonesModel
 from torchsim.models.mace import MaceModel
-from torchsim.optimizers import fire
+from torchsim.optimizers import unit_cell_fire
 from torchsim.quantities import kinetic_energy
 from torchsim.runners import integrate, optimize, state_to_atoms, state_to_structures
 from torchsim.trajectory import TorchSimTrajectory, TrajectoryReporter
@@ -37,7 +40,7 @@ final_state = integrate(
     system=si_atoms,
     model=lj_model,
     integrator=nvt_langevin,
-    n_steps=1000,
+    n_steps=100 if os.getenv("CI") else 1000,
     temperature=2000,
     timestep=0.002,
 )
@@ -62,7 +65,7 @@ final_state = integrate(
     system=si_atoms,
     model=lj_model,
     integrator=nvt_langevin,
-    n_steps=1000,
+    n_steps=100 if os.getenv("CI") else 1000,
     temperature=2000,
     timestep=0.002,
     trajectory_reporter=reporter,
@@ -103,7 +106,7 @@ final_state = integrate(
     system=si_atoms,
     model=mace_model,
     integrator=nvt_langevin,
-    n_steps=100,
+    n_steps=100 if os.getenv("CI") else 1000,
     temperature=2000,
     timestep=0.002,
     trajectory_reporter=reporter,
@@ -121,7 +124,7 @@ final_state = integrate(
     system=[si_atoms, fe_atoms, si_atoms_supercell, fe_atoms_supercell],
     model=mace_model,
     integrator=nvt_langevin,
-    n_steps=100,
+    n_steps=100 if os.getenv("CI") else 1000,
     temperature=2000,
     timestep=0.002,
 )
@@ -143,7 +146,7 @@ final_state = integrate(
     system=systems,
     model=mace_model,
     integrator=nvt_langevin,
-    n_steps=100,
+    n_steps=100 if os.getenv("CI") else 1000,
     temperature=2000,
     timestep=0.002,
     trajectory_reporter=batch_reporter,
@@ -161,23 +164,25 @@ systems = [si_atoms, fe_atoms, si_atoms_supercell, fe_atoms_supercell]
 final_state = optimize(
     system=systems,
     model=mace_model,
-    optimizer=fire,
+    optimizer=unit_cell_fire,
+    max_steps=10 if os.getenv("CI") else 1000,
 )
 
 
 systems = [si_atoms, fe_atoms, si_atoms_supercell, fe_atoms_supercell]
 
+rng = np.random.default_rng()
 for system in systems:
-    system.positions += torch.randn_like(system.positions) * 0.01
-
+    system.positions += rng.random(system.positions.shape) * 0.01
 
 final_state = optimize(
     system=systems,
     model=mace_model,
-    optimizer=fire,
+    optimizer=unit_cell_fire,
     convergence_fn=lambda state, last_energy: torch.all(
         last_energy - state.energy < 1e-6 * MetalUnits.energy
     ),
+    max_steps=10 if os.getenv("CI") else 1000,
 )
 
 
@@ -198,7 +203,7 @@ final_state = integrate(
     system=structure,
     model=lj_model,
     integrator=nvt_langevin,
-    n_steps=1000,
+    n_steps=100 if os.getenv("CI") else 1000,
     temperature=2000,
     timestep=0.002,
 )

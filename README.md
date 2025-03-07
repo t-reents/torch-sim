@@ -7,13 +7,28 @@ TorchSim is an open-source simulation engine in PyTorch focused on atomistic sim
 
 ## Installation
 
-```bash
-git clone https://github.com/radical-ai/torch-sim.git
+```sh
+git clone https://github.com/radical-ai/torch-sim
 cd torch-sim
 pip install .
 ```
 
+## Running Example Scripts
+
+`torchsim` has dozens of demos in the [`examples/`](examples) folder. To run any of the them, use the following command:
+
+```sh
+# if uv is not yet installed
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# pick any of the examples
+uv run --with . examples/2_Structural_optimization/2.3_MACE_FIRE.py
+uv run --with . examples/3_Dynamics/3.3_MACE_NVE_cueq.py
+uv run --with . examples/4_High_level_api/4.1_high_level_api.py
+```
+
 ## High-level API Example with ASE
+
 ```python
 from ase.build import bulk
 from torchsim.runners import integrate, state_to_atoms
@@ -45,6 +60,7 @@ final_atoms = state_to_atoms(final_state)
 ```
 
 ## Low-level API Example with ASE
+
 ```python
 # the model and atoms will remain the same
 
@@ -72,7 +88,6 @@ for step in range(1000):
 ## High-level API with reporting
 
 ```python
-
 from torchsim.trajectory import TrajectoryReporter, TorchSimTrajectory
 from torchsim.quantities import kinetic_energy
 
@@ -108,7 +123,6 @@ with TorchSimTrajectory(trajectory_file) as traj:
     final_energy = potential_energies[-1]
 
     final_atoms = traj.get_atoms(-1)
-
 ```
 
 ## High-level API with MACE and batching
@@ -165,49 +179,51 @@ for filename in trajectory_files:
     with TorchSimTrajectory(filename) as traj:
         print(traj)
 ```
+
 ## Core modules
 
 TorchSim is built around the following core modules:
 
-- `torchsim.integrators`: Provides batched molecular dynamics integrators for simulating the time evolution of molecular systems.
+- [`torchsim.integrators`](torchsim/integrators.py): Provides batched molecular dynamics integrators for simulating the time evolution of molecular systems.
 
-- `torchsim.optimizers`: Provides optimization algorithms for molecular systems, including gradient descent and the FIRE algorithm.
+- [`torchsim.optimizers`](torchsim/optimizers.py): Provides optimization algorithms for molecular systems, including gradient descent and the FIRE algorithm.
 
-- `torchsim.unbatched_integrators`: Provides unbatched molecular dynamics integrators for simulating the time evolution of molecular systems.
+- [`torchsim.unbatched_integrators`](torchsim/unbatched_integrators.py): Provides unbatched molecular dynamics integrators for simulating the time evolution of molecular systems.
 
-- `torchsim.unbatched_optimizers`: Provides unbatched optimization algorithms for molecular systems, including gradient descent and the FIRE algorithm.
+- [`torchsim.unbatched_optimizers`](torchsim/unbatched_optimizers.py): Provides unbatched optimization algorithms for molecular systems, including gradient descent and the FIRE algorithm.
 
-- `torchsim.monte_carlo`: Contains functions for performing Monte Carlo simulations, including swap-based Monte Carlo.
+- [`torchsim.monte_carlo`](torchsim/monte_carlo.py): Contains functions for performing Monte Carlo simulations, including swap-based Monte Carlo.
 
-- `torchsim.neighbors`: Contains functions for constructing neighbor lists.
+- [`torchsim.neighbors`](torchsim/neighbors.py): Contains functions for constructing neighbor lists.
 
-- `torchsim.quantities`: Functions for computing physical quantities, such as kinetic energy, from simulation data.
+- [`torchsim.quantities`](torchsim/quantities.py): Functions for computing physical quantities, such as kinetic energy, from simulation data.
 
-- `torchsim.runners`: Provides functions for running molecular dynamics simulations and optimizations, handling simulation state and conversions between different representations.
+- [`torchsim.runners`](torchsim/runners.py): Provides functions for running molecular dynamics simulations and optimizations, handling simulation state and conversions between different representations.
 
-- `torchsim.state`: Defines the `BaseState` class, a dataclass for representing the state of molecular systems.
+- [`torchsim.state`](torchsim/state.py): Defines the `BaseState` class, a `dataclass` for representing the state of molecular systems.
 
-- `torchsim.trajectory`: Implements classes for handling trajectory data, allowing for reading and writing of simulation data to HDF5 files.
+- [`torchsim.trajectory`](torchsim/trajectory.py): Implements classes for handling trajectory data, allowing for reading and writing of simulation data to HDF5 files.
 
-- `torchsim.transforms`: Functions for handling coordinate transformations and periodic boundary conditions in molecular simulations.
+- [`torchsim.transforms`](torchsim/transforms.py): Functions for handling coordinate transformations and periodic boundary conditions in molecular simulations.
 
-- `torchsim.elastic`: Contains classes and functions for calculating crystal elasticity, including the representation of elastic states and computation of elastic tensors.
+- [`torchsim.elastic`](torchsim/elastic.py): Contains classes and functions for calculating crystal elasticity, including the representation of elastic states and computation of elastic tensors.
 
-- `torchsim.utils`: Utility functions.
+- [`torchsim.utils`](torchsim/utils.py): Utility functions.
 
-- `torchsim.units`: Unit system and conversion factors
+- [`torchsim.units`](torchsim/units.py): Unit system and conversion factors
 
-- `torchsim.worlflows`: Utility functions for running workflows.
+- [`torchsim.workflows`](torchsim/workflows.py): Utility functions for running workflows.
 
 Each module is designed to work seamlessly with PyTorch, enabling efficient and flexible molecular simulations.
+
 ## API
 
 ### State and Parameters
 
 The simulation engine uses two main objects:
 
-| Temperature Profile | RDF Comparison |
-| ------------------ | -------------- |
+| Temperature Profile                                                                                     | RDF Comparison                                                                                     |
+| ------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
 | ![Temperature Profile](https://github.com/user-attachments/assets/4d87444f-751d-49f4-ada2-c4578abe0a18) | ![RDF Comparison](https://github.com/user-attachments/assets/f84b4b3f-5b09-4cf5-9eda-b0f766be93fc) |
 
 ### State (S)

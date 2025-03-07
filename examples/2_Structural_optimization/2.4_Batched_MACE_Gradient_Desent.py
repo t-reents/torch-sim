@@ -6,6 +6,8 @@
 # ]
 # ///
 
+import os
+
 import numpy as np
 import torch
 from ase.build import bulk
@@ -18,7 +20,7 @@ from torchsim.runners import atoms_to_state
 
 
 # Set device and data type
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = "cuda" if torch.cuda.is_available() else "cpu"
 dtype = torch.float32
 
 # Option 1: Load the raw model from the downloaded model
@@ -33,10 +35,14 @@ loaded_model = mace_mp(
 # Option 2: Load from local file (comment out Option 1 to use this)
 # MODEL_PATH = "../../../checkpoints/MACE/mace-mpa-0-medium.model"
 # loaded_model = torch.load(MODEL_PATH, map_location=device)
+
+# Number of steps to run
+N_steps = 10 if os.getenv("CI") else 500
+
 PERIODIC = True
 
 # Set random seed for reproducibility
-rng = np.random.default_rng()
+rng = np.random.default_rng(seed=0)
 
 # Create diamond cubic Silicon systems
 si_dc = bulk("Si", "diamond", a=5.43, cubic=True).repeat((2, 2, 2))
@@ -126,7 +132,7 @@ gd_init, gd_update = gradient_descent(
 state = gd_init(state)
 # Run batched optimization for a few steps
 print("\nRunning batched gradient descent:")
-for step in range(100):
+for step in range(N_steps):
     if step % 10 == 0:
         print(f"Step {step}, Energy: {[res.item() for res in state.energy]} eV")
     state = gd_update(state)

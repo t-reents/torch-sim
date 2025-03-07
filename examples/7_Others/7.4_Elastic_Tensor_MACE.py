@@ -4,6 +4,7 @@
 # dependencies = [
 #     "ase>=3.24",
 #     "mace-torch>=0.3.10",
+#     "spglib",
 # ]
 # ///
 
@@ -207,8 +208,8 @@ def get_bravais_type(  # noqa: C901
     return latt_type, bravais, sg_symbol, sg_nr
 
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-calculator = mace_mp(model="medium", enable_cueq=True, default_dtype="float64")
+device = "cuda" if torch.cuda.is_available() else "cpu"
+calculator = mace_mp(model="medium", enable_cueq=False, default_dtype="float64")
 
 # Copper
 N = 2
