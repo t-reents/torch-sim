@@ -23,7 +23,7 @@ class M3GnetModel(nn.Module):
         allow_tf32: bool = False,
         compute_force: bool = False,
         compute_stress: bool = False,
-        **kwargs: Any,
+        **_kwargs: Any,
     ) -> None:
         """Initialize the potential.
 

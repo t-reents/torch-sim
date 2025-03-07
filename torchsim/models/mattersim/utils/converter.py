@@ -121,17 +121,11 @@ def get_fixed_radius_bonding(
     lattice_matrix = np.ascontiguousarray(structure.cell[:], dtype=float)
 
     cart_coords = np.ascontiguousarray(np.array(structure.positions), dtype=float)
-    r = float(cutoff)
 
-    (
-        center_indices,
-        neighbor_indices,
-        images,
-        distances,
-    ) = find_points_in_spheres(
+    center_indices, neighbor_indices, images, distances = find_points_in_spheres(
         cart_coords,
         cart_coords,
-        r=r,
+        r=float(cutoff),
         pbc=pbc_,
         lattice=lattice_matrix,
         tol=numerical_tol,
@@ -175,7 +169,7 @@ class GraphConverter:
         self.threebody_cutoff = threebody_cutoff
         self.has_threebody = has_threebody
 
-    def convert(  # noqa: PLR0915
+    def convert(
         self,
         atoms: Atoms,
         *,
@@ -183,7 +177,7 @@ class GraphConverter:
         forces: np.ndarray | None = None,
         stress: np.ndarray | None = None,
         pbc: bool = True,
-        **kwargs: Any,
+        **_kwargs: Any,
     ) -> Data:
         """Convert the structure into graph.
 
@@ -247,27 +241,21 @@ class GraphConverter:
             )
             args["atom_pos"] = torch.FloatTensor(atoms.get_positions())
             args["cell"] = torch.FloatTensor(np.array(atoms.cell)).unsqueeze(0)
-            (
-                sent_index,
-                receive_index,
-                shift_vectors,
-                distances,
-            ) = get_fixed_radius_bonding(atoms, self.twobody_cutoff)
+            sent_index, receive_index, shift_vectors, distances = (
+                get_fixed_radius_bonding(atoms, self.twobody_cutoff)
+            )
             args["num_bonds"] = len(sent_index)
             args["edge_index"] = torch.from_numpy(np.array([sent_index, receive_index]))
             args["pbc_offsets"] = torch.FloatTensor(shift_vectors)
             if self.has_threebody:
-                (
-                    triple_bond_index,
-                    n_triple_ij,
-                    n_triple_i,
-                    n_triple_s,
-                ) = compute_threebody_indices(
-                    bond_atom_indices=args["edge_index"].numpy().transpose(1, 0),
-                    bond_length=distances,
-                    n_atoms=atoms.positions.shape[0],
-                    atomic_number=atoms.get_atomic_numbers(),
-                    threebody_cutoff=self.threebody_cutoff,
+                triple_bond_index, n_triple_ij, n_triple_i, n_triple_s = (
+                    compute_threebody_indices(
+                        bond_atom_indices=args["edge_index"].numpy().transpose(1, 0),
+                        bond_length=distances,
+                        n_atoms=atoms.positions.shape[0],
+                        atomic_number=atoms.get_atomic_numbers(),
+                        threebody_cutoff=self.threebody_cutoff,
+                    )
                 )
                 args["three_body_indices"] = torch.from_numpy(triple_bond_index).to(
                     torch.long
@@ -280,12 +268,10 @@ class GraphConverter:
                 args["three_body_indices"] = None
                 args["num_three_body"] = None
                 args["num_triple_ij"] = None
-            if energy is not None:
-                args["energy"] = torch.FloatTensor([energy])
-            if forces is not None:
-                args["forces"] = torch.FloatTensor(forces)
-            if stress is not None:
-                args["stress"] = torch.FloatTensor(stress).unsqueeze(0)
+
+            for key, value in dict(energy=energy, forces=forces, stress=stress).items():
+                if value is not None:
+                    args[key] = torch.FloatTensor([value])
             return Data(**args)
 
         raise NotImplementedError(f"model type {self.model_type} not implemented")

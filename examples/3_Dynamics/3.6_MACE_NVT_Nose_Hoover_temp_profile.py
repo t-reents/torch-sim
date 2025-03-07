@@ -6,6 +6,7 @@ temperature profile.
 # dependencies = [
 #     "mace-torch>=0.3.10",
 #     "plotly>=6",
+#     "kaleido>=1.0.0rc0",
 # ]
 # ///
 
@@ -24,11 +25,11 @@ from torchsim.units import MetalUnits as Units
 
 def get_kT(  # noqa: N802
     step: int,
-    num_steps_initial: int,
-    num_steps_ramp_up: int,
-    num_steps_melt: int,
-    num_steps_ramp_down: int,
-    num_steps_anneal: int,
+    n_steps_initial: int,
+    n_steps_ramp_up: int,
+    n_steps_melt: int,
+    n_steps_ramp_down: int,
+    n_steps_anneal: int,
     melt_temp: float,
     cool_temp: float,
     anneal_temp: float,
@@ -38,32 +39,30 @@ def get_kT(  # noqa: N802
     Temperature profile:
     300K (initial) → ramp to 3_000K → hold at 3_000K → quench to 300K → hold at 300K.
     """
-    if step < num_steps_initial:
+    if step < n_steps_initial:
         # Initial equilibration at cool temperature
         return torch.tensor(cool_temp, device=device)
-    if step < (num_steps_initial + num_steps_ramp_up):
+    if step < (n_steps_initial + n_steps_ramp_up):
         # Linear ramp from cool_temp to melt_temp
-        progress = (step - num_steps_initial) / num_steps_ramp_up
+        progress = (step - n_steps_initial) / n_steps_ramp_up
         current_kT = cool_temp + (melt_temp - cool_temp) * progress
         return torch.tensor(current_kT, device=device)
-    if step < (num_steps_initial + num_steps_ramp_up + num_steps_melt):
+    if step < (n_steps_initial + n_steps_ramp_up + n_steps_melt):
         # Hold at melting temperature
         return torch.tensor(melt_temp, device=device)
-    if step < (
-        num_steps_initial + num_steps_ramp_up + num_steps_melt + num_steps_ramp_down
-    ):
+    if step < (n_steps_initial + n_steps_ramp_up + n_steps_melt + n_steps_ramp_down):
         # Linear cooling from melt_temp to cool_temp
         progress = (
-            step - (num_steps_initial + num_steps_ramp_up + num_steps_melt)
-        ) / num_steps_ramp_down
+            step - (n_steps_initial + n_steps_ramp_up + n_steps_melt)
+        ) / n_steps_ramp_down
         current_kT = melt_temp - (melt_temp - cool_temp) * progress
         return torch.tensor(current_kT, device=device)
     if step < (
-        num_steps_initial
-        + num_steps_ramp_up
-        + num_steps_melt
-        + num_steps_ramp_down
-        + num_steps_anneal
+        n_steps_initial
+        + n_steps_ramp_up
+        + n_steps_melt
+        + n_steps_ramp_down
+        + n_steps_anneal
     ):
         # Hold at annealing temperature
         return torch.tensor(anneal_temp, device=device)
@@ -92,24 +91,20 @@ loaded_model = mace_mp(
 PERIODIC = True
 
 # Temperature profile settings
-Initial_temperature = 300
-Melting_temperature = 3_000
-Cooling_temperature = 300
-Annealing_temperature = 300
+init_temp = 300
+melting_temp = 1000
+cooling_temp = 300
+annealing_temp = 300
 
 # Step counts for different phases
-Num_steps_initial = 1_000
-Num_steps_ramp_up = 1_000
-Num_steps_melt = 1_000
-Num_steps_ramp_down = 1_000
-Num_steps_anneal = 1_000
+n_steps_initial = 200
+n_steps_ramp_up = 200
+n_steps_melt = 200
+n_steps_ramp_down = 200
+n_steps_anneal = 200
 
-Num_steps = (
-    Num_steps_initial
-    + Num_steps_ramp_up
-    + Num_steps_melt
-    + Num_steps_ramp_down
-    + Num_steps_anneal
+n_steps = (
+    n_steps_initial + n_steps_ramp_up + n_steps_melt + n_steps_ramp_down + n_steps_anneal
 )
 
 # Create a random alloy system
@@ -151,7 +146,7 @@ results = model(positions=positions, cell=cell, atomic_numbers=atomic_numbers)
 
 # Set up simulation parameters
 dt = 0.002 * Units.time
-kT = Initial_temperature * Units.temperature  # noqa: N816
+kT = init_temp * Units.temperature  # noqa: N816
 
 state = {
     "positions": positions,
@@ -165,28 +160,28 @@ nvt_init, nvt_update = nvt_nose_hoover(model=model, kT=kT, dt=dt)
 state = nvt_init(state, kT=kT, seed=1)
 
 # Run simulation with temperature profile
-Temperature = np.zeros(Num_steps)
-Expected_temperature = np.zeros(Num_steps)
+actual_temps = np.zeros(n_steps)
+expected_temps = np.zeros(n_steps)
 
-for step in range(Num_steps):
+for step in range(n_steps):
     # Get target temperature for current step
     current_kT = get_kT(  # noqa: N816
         step=step,
-        num_steps_initial=Num_steps_initial,
-        num_steps_ramp_up=Num_steps_ramp_up,
-        num_steps_melt=Num_steps_melt,
-        num_steps_ramp_down=Num_steps_ramp_down,
-        num_steps_anneal=Num_steps_anneal,
-        melt_temp=Melting_temperature,
-        cool_temp=Cooling_temperature,
-        anneal_temp=Annealing_temperature,
+        n_steps_initial=n_steps_initial,
+        n_steps_ramp_up=n_steps_ramp_up,
+        n_steps_melt=n_steps_melt,
+        n_steps_ramp_down=n_steps_ramp_down,
+        n_steps_anneal=n_steps_anneal,
+        melt_temp=melting_temp,
+        cool_temp=cooling_temp,
+        anneal_temp=annealing_temp,
         device=device,
     )
 
     # Calculate current temperature and save data
     temp = temperature(masses=state.masses, momenta=state.momenta) / Units.temperature
-    Temperature[step] = temp
-    Expected_temperature[step] = current_kT
+    actual_temps[step] = temp
+    expected_temps[step] = current_kT
 
     # Calculate invariant and progress report
     invariant = nvt_nose_hoover_invariant(state, kT=current_kT * Units.temperature)
@@ -198,13 +193,11 @@ for step in range(Num_steps):
 # Visualize temperature profile
 fig = make_subplots()
 fig.add_scatter(
-    x=np.arange(Num_steps) * 0.002, y=Temperature, name="Simulated Temperature"
+    x=np.arange(n_steps) * 0.002, y=actual_temps, name="Simulated Temperature"
 )
 fig.add_scatter(
-    x=np.arange(Num_steps) * 0.002, y=Expected_temperature, name="Desired Temperature"
+    x=np.arange(n_steps) * 0.002, y=expected_temps, name="Desired Temperature"
 )
-fig.update_layout(
-    xaxis_title="time (ps)",
-)
-fig.update_yaxes(title_text="Temperature (K)")
+fig.layout.xaxis.title = "time (ps)"
+fig.layout.yaxis.title = "Temperature (K)"
 fig.write_image("nvt_visualization_temperature.pdf")
