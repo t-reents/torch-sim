@@ -1,7 +1,12 @@
 """Plot the soft sphere potential energy vs distance using plotly."""
 
+# /// script
+# dependencies = [
+#     "plotly>=6",
+# ]
+# ///
+
 import numpy as np
-import plotly.graph_objects as go
 import torch
 from plotly.subplots import make_subplots
 
@@ -18,7 +23,7 @@ dr_tensor = torch.sqrt(torch.tensor(dr))
 
 # Calculate potential energy
 # Make dr_tensor require gradients for autograd
-dr_tensor.requires_grad_(True)
+dr_tensor.requires_grad_(True)  # noqa: FBT003
 
 # Calculate potential energy with gradients enabled
 energy = soft_sphere_pair(dr_tensor, sigma, epsilon, alpha)

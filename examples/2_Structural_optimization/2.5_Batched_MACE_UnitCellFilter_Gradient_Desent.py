@@ -1,15 +1,22 @@
-# Import dependencies
+"""Batched MACE unit cell filter with gradient descent optimizer."""
+
+# /// script
+# dependencies = [
+#     "mace-torch>=0.3.10",
+# ]
+# ///
+
 import numpy as np
 import torch
 from ase.build import bulk
+from mace.calculators.foundations_models import mace_mp
 
-# Import torchsim models and optimizers
 from torchsim.models.mace import MaceModel
 from torchsim.neighbors import vesin_nl_ts
 from torchsim.optimizers import unit_cell_gradient_descent
 from torchsim.runners import atoms_to_state
 from torchsim.units import UnitConversion
-from mace.calculators.foundations_models import mace_mp
+
 
 # Set device and data type
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -108,9 +115,14 @@ for step in range(500):
 
 print(f"Initial energies: {[energy.item() for energy in results['energy']]} eV")
 print(f"Final energies: {[energy.item() for energy in state.energy]} eV")
-print(
-    f"Initial pressure: {[torch.trace(stress).item() * UnitConversion.eV_per_Ang3_to_GPa / 3 for stress in results['stress']]} GPa"
-)
-print(
-    f"Final pressure: {[torch.trace(stress).item() * UnitConversion.eV_per_Ang3_to_GPa / 3 for stress in state.stress]} GPa"
-)
+
+initial_pressure = [
+    torch.trace(stress).item() * UnitConversion.eV_per_Ang3_to_GPa / 3
+    for stress in results["stress"]
+]
+final_pressure = [
+    torch.trace(stress).item() * UnitConversion.eV_per_Ang3_to_GPa / 3
+    for stress in state.stress
+]
+print(f"{initial_pressure=} GPa")
+print(f"{final_pressure=} GPa")

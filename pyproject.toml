@@ -26,17 +26,18 @@ classifiers = [
 ]
 requires-python = ">=3.11"
 dependencies = [
-    "ase>=3.22.1",
+    "ase>=3.24",
     "h5py>=3.12.1",
-    "numpy>=1.26.0",
+    "numpy>=1.26",
     "tables>=3.10.2",
-    "torch>=2.0.0",
+    "torch>=2",
+    "tqdm>=4.67",
     "vesin-torch>=0.3.1",
     "vesin>=0.3.1",
 ]
 
 [project.optional-dependencies]
-test = ["ase>=3.24.0", "pymatgen>=2024.11.3", "pytest-cov>=6", "pytest>=8"]
+test = ["ase>=3.24", "pymatgen>=2024.11.3", "pytest-cov>=6", "pytest>=8"]
 models = ["mace-torch>=0.3.10"]
 
 [project.urls]
@@ -61,7 +62,6 @@ output-format = "concise"
 
 [tool.ruff.lint]
 select = ["ALL"]
-exclude = ["examples/*"]
 ignore = [
     "ANN002",  # Checks that *args arguments have type annotations.
     "ANN003",  # Checks that **kwargs arguments have type annotations.
@@ -85,6 +85,7 @@ ignore = [
     "PLR2004", # Magic value used in comparison, consider replacing {value} with a constant variable
     "PLW2901", # Outer for loop variable overwritten by inner assignment target
     "PTH",     # flake8-use-pathlib
+    "RUF001",  # String contains ambiguous
     "S101",    # Use of assertion statements
     "S301",    # pickle and modules that wrap it can be unsafe, possible security issue
     "S311",    # Standard pseudo-random generators are not suitable for cryptographic purposes
@@ -114,7 +115,7 @@ docstring-code-format = true
 
 [tool.codespell]
 check-filenames = true
-skip = "*.key"                                                           # binary SSH key files not supported
+skip = "*.key"         # binary SSH key files not supported
 
 [tool.mypy]
 ignore_missing_imports = true

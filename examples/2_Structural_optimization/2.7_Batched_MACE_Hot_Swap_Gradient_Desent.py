@@ -1,13 +1,19 @@
+"""Batched MACE hot swap gradient descent example."""
+
+# /// script
+# dependencies = [
+#     "mace-torch>=0.3.10",
+# ]
+# ///
 import numpy as np
 import torch
 from ase.build import bulk
 from mace.tools import atomic_numbers_to_indices, to_one_hot
 
-from torchsim.optimizers import batched_unit_cell_gradient_descent
 from torchsim.models.mace import MaceModel
 from torchsim.neighbors import vesin_nl_ts
-from torchsim.optimizers import batched_unit_cell_gradient_descent
-from mace.tools import atomic_numbers_to_indices, to_one_hot
+from torchsim.optimizers import unit_cell_gradient_descent
+
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 dtype = torch.float32
@@ -88,7 +94,7 @@ learning_rate = 0.01
 learning_rates = torch.tensor([learning_rate, learning_rate], device=device, dtype=dtype)
 
 # Initialize unit cell gradient descent optimizer
-batch_state, gd_update = batched_unit_cell_gradient_descent(
+batch_state, gd_update = unit_cell_gradient_descent(
     model=batched_model,
     positions_list=positions_list,
     masses_list=masses_list,
@@ -168,7 +174,7 @@ for step in range(200):
             )
 
             # Reinitialize optimizer with updated batch information
-            batch_state, gd_update = batched_unit_cell_gradient_descent(
+            batch_state, gd_update = unit_cell_gradient_descent(
                 model=batched_model,
                 positions_list=positions_list,
                 masses_list=masses_list,
@@ -184,9 +190,10 @@ for step in range(200):
     # Get new results with updated atomic numbers
     results = batched_model(positions_list, cell_list)
 
-    print(
-        f"{step=}, E: {batch_state.energy}, P: B1: {torch.trace(results['stress'][0]) * 160.21766208 / 3} GPa, B2: {torch.trace(results['stress'][1]) * 160.21766208 / 3} GPa"
-    )
+    b1_stress = torch.trace(results["stress"][0]) * 160.21766208 / 3
+    b2_stress = torch.trace(results["stress"][1]) * 160.21766208 / 3
+    energy = batch_state.energy
+    print(f"{step=}, E: {energy}, P: B1: {b1_stress:.4f} GPa, B2: {b2_stress:.4f} GPa")
     print(f"Max force norms: {force_norms}")
     print(f"Force converged: {force_converged}")
     batch_state = gd_update(batch_state)

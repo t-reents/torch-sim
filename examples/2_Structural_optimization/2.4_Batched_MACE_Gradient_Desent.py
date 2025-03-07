@@ -1,15 +1,21 @@
-# Import dependencies
+"""Batched MACE gradient descent example."""
+
+# /// script
+# dependencies = [
+#     "mace-torch>=0.3.10",
+# ]
+# ///
+
 import numpy as np
 import torch
 from ase.build import bulk
+from mace.calculators.foundations_models import mace_mp
 
-# Import torchsim models and neighbors list
 from torchsim.models.mace import MaceModel
 from torchsim.neighbors import vesin_nl_ts
 from torchsim.optimizers import gradient_descent
 from torchsim.runners import atoms_to_state
 
-from mace.calculators.foundations_models import mace_mp
 
 # Set device and data type
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

@@ -1,16 +1,23 @@
-# Import dependencies
+"""NVE simulation with MACE and cuEquivariance enabled."""
+
+# /// script
+# dependencies = [
+#     "mace-torch>=0.3.10",
+# ]
+# ///
+
 import time
+
 import torch
 from ase.build import bulk
+from mace.calculators.foundations_models import mace_mp
 
-# Import torchsim models and integrators
-from torchsim.unbatched_integrators import nve
 from torchsim.models.mace import UnbatchedMaceModel
 from torchsim.neighbors import vesin_nl_ts
 from torchsim.quantities import kinetic_energy
+from torchsim.unbatched_integrators import nve
 from torchsim.units import MetalUnits as Units
 
-from mace.calculators.foundations_models import mace_mp
 
 # Set device and data type
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -56,7 +63,7 @@ model = UnbatchedMaceModel(
 results = model(positions=positions, cell=cell, atomic_numbers=atomic_numbers)
 
 # Setup NVE MD simulation parameters
-kT = 1000 * Units.temperature  # Initial temperature (K)
+kT = 1000 * Units.temperature  # Initial temperature (K)  # noqa: N816
 dt = 0.002 * Units.time  # Timestep (ps)
 
 # Initialize NVE integrator
@@ -68,11 +75,7 @@ state = {
     "atomic_numbers": atomic_numbers,
 }
 # Initialize NVE integrator
-nve_init, nve_update = nve(
-    model=model,
-    dt=dt,
-    kT=kT,
-)
+nve_init, nve_update = nve(model=model, dt=dt, kT=kT)
 state = nve_init(state=state, seed=1)
 
 # Run MD simulation

@@ -1,10 +1,10 @@
-# Import dependencies
+"""NVE simulation with Lennard-Jones potential."""
+
 import torch
 
-# Import torchsim models and integrators
-from torchsim.unbatched_integrators import nve
 from torchsim.models.lennard_jones import UnbatchedLennardJonesModel
 from torchsim.quantities import kinetic_energy
+from torchsim.unbatched_integrators import nve
 from torchsim.units import MetalUnits as Units
 
 
@@ -25,7 +25,7 @@ generator.manual_seed(42)  # For reproducibility
 
 # Create face-centered cubic (FCC) Argon
 # 5.26 Å is a typical lattice constant for Ar
-a = 5.26  # Lattice constant
+a_len = 5.26  # Lattice constant
 PERIODIC = True  # Flag to use periodic boundary conditions
 
 # Generate base FCC unit cell positions (scaled by lattice constant)
@@ -54,11 +54,11 @@ for i in range(4):
 positions = torch.stack(positions)
 
 # Scale by lattice constant
-positions = positions * a
+positions = positions * a_len
 
 # Create the cell tensor
 cell = torch.tensor(
-    [[4 * a, 0, 0], [0, 4 * a, 0], [0, 0, 4 * a]], device=device, dtype=dtype
+    [[4 * a_len, 0, 0], [0, 4 * a_len, 0], [0, 0, 4 * a_len]], device=device, dtype=dtype
 )
 
 # Create the atomic numbers tensor (Argon = 18)
@@ -95,7 +95,7 @@ results = model(positions=positions, cell=cell, atomic_numbers=atomic_numbers)
 # Set up NVE simulation
 # kT: initial temperature in metal units (K)
 # dt: timestep in metal units (ps)
-kT = 80 * Units.temperature
+kT = 80 * Units.temperature  # noqa: N816
 dt = 0.001 * Units.time
 
 # Initialize NVE integrator
@@ -115,6 +115,7 @@ for step in range(2_000):
     # Update state using NVE integrator
     state = nve_update(state=state, dt=dt)
 
-print(
-    f"Final total energy: {state.energy + kinetic_energy(masses=state.masses, momenta=state.momenta).item():.4f}"
+final_total_energy = state.energy + kinetic_energy(
+    masses=state.masses, momenta=state.momenta
 )
+print(f"Final total energy: {final_total_energy.item():.4f}")

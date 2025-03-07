@@ -1,22 +1,28 @@
-"""Example NVT Nose Hoover MD simulation of random alloy using MACE model with temperature profile."""
+"""Example NVT Nose Hoover MD simulation of random alloy using MACE model with
+temperature profile.
+"""
 
-# Import dependencies
+# /// script
+# dependencies = [
+#     "mace-torch>=0.3.10",
+#     "plotly>=6",
+# ]
+# ///
+
 import numpy as np
 import torch
 from ase.build import bulk
+from mace.calculators.foundations_models import mace_mp
 from plotly.subplots import make_subplots
 
-# Import torchsim models and integrators
-from torchsim.unbatched_integrators import nvt_nose_hoover, nvt_nose_hoover_invariant
 from torchsim.models.mace import UnbatchedMaceModel
 from torchsim.neighbors import vesin_nl_ts
 from torchsim.quantities import temperature
+from torchsim.unbatched_integrators import nvt_nose_hoover, nvt_nose_hoover_invariant
 from torchsim.units import MetalUnits as Units
 
-from mace.calculators.foundations_models import mace_mp
 
-
-def get_kT(
+def get_kT(  # noqa: N802
     step: int,
     num_steps_initial: int,
     num_steps_ramp_up: int,
@@ -28,23 +34,22 @@ def get_kT(
     anneal_temp: float,
     device: torch.device,
 ) -> torch.Tensor:
-    """
-    Determine target kT based on current simulation step.
+    """Determine target kT based on current simulation step.
     Temperature profile:
-    300K (initial) → ramp to 3_000K → hold at 3_000K → quench to 300K → hold at 300K
+    300K (initial) → ramp to 3_000K → hold at 3_000K → quench to 300K → hold at 300K.
     """
     if step < num_steps_initial:
         # Initial equilibration at cool temperature
         return torch.tensor(cool_temp, device=device)
-    elif step < (num_steps_initial + num_steps_ramp_up):
+    if step < (num_steps_initial + num_steps_ramp_up):
         # Linear ramp from cool_temp to melt_temp
         progress = (step - num_steps_initial) / num_steps_ramp_up
         current_kT = cool_temp + (melt_temp - cool_temp) * progress
         return torch.tensor(current_kT, device=device)
-    elif step < (num_steps_initial + num_steps_ramp_up + num_steps_melt):
+    if step < (num_steps_initial + num_steps_ramp_up + num_steps_melt):
         # Hold at melting temperature
         return torch.tensor(melt_temp, device=device)
-    elif step < (
+    if step < (
         num_steps_initial + num_steps_ramp_up + num_steps_melt + num_steps_ramp_down
     ):
         # Linear cooling from melt_temp to cool_temp
@@ -53,7 +58,7 @@ def get_kT(
         ) / num_steps_ramp_down
         current_kT = melt_temp - (melt_temp - cool_temp) * progress
         return torch.tensor(current_kT, device=device)
-    elif step < (
+    if step < (
         num_steps_initial
         + num_steps_ramp_up
         + num_steps_melt
@@ -62,9 +67,8 @@ def get_kT(
     ):
         # Hold at annealing temperature
         return torch.tensor(anneal_temp, device=device)
-    else:
-        # Hold at annealing temperature
-        return torch.tensor(anneal_temp, device=device)
+    # Hold at annealing temperature
+    return torch.tensor(anneal_temp, device=device)
 
 
 # Set device and data type
@@ -117,7 +121,9 @@ probabilities = [0.33, 0.33, 0.34]
 fcc_lattice = bulk("Cu", "fcc", a=3.61, cubic=True).repeat((2, 2, 2))
 
 # Randomly assign species
-random_species = np.random.choice(species, size=len(fcc_lattice), p=probabilities)
+random_species = np.random.default_rng(seed=0).choice(
+    species, size=len(fcc_lattice), p=probabilities
+)
 fcc_lattice.set_chemical_symbols(random_species)
 
 # Prepare input tensors
@@ -145,7 +151,7 @@ results = model(positions=positions, cell=cell, atomic_numbers=atomic_numbers)
 
 # Set up simulation parameters
 dt = 0.002 * Units.time
-kT = Initial_temperature * Units.temperature
+kT = Initial_temperature * Units.temperature  # noqa: N816
 
 state = {
     "positions": positions,
@@ -164,7 +170,7 @@ Expected_temperature = np.zeros(Num_steps)
 
 for step in range(Num_steps):
     # Get target temperature for current step
-    current_kT = get_kT(
+    current_kT = get_kT(  # noqa: N816
         step=step,
         num_steps_initial=Num_steps_initial,
         num_steps_ramp_up=Num_steps_ramp_up,
@@ -201,4 +207,4 @@ fig.update_layout(
     xaxis_title="time (ps)",
 )
 fig.update_yaxes(title_text="Temperature (K)")
-fig.write_image(f"nvt_visualization_temperature.pdf")
+fig.write_image("nvt_visualization_temperature.pdf")
