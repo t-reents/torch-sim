@@ -246,7 +246,7 @@ def nve(
         state: BaseState | StateDict,
         kT: torch.Tensor = kT,
         seed: int | None = None,
-        **extra_state_kwargs: Any,
+        **kwargs: Any,
     ) -> MDState:
         """Initialize an NVE state from input data.
 
@@ -255,7 +255,7 @@ def nve(
                 masses, cell, pbc
             kT: Temperature in energy units for initializing momenta
             seed: Random seed for reproducibility
-            **extra_state_kwargs: Additional state arguments
+            **kwargs: Additional state arguments
 
         Returns:
             MDState: Initialized state for NVE integration
@@ -264,8 +264,8 @@ def nve(
         if not isinstance(state, BaseState):
             state = BaseState(**state)
 
-        # Override with extra_state_kwargs if provided
-        atomic_numbers = extra_state_kwargs.get("atomic_numbers", state.atomic_numbers)
+        # Override with kwargs if provided
+        atomic_numbers = kwargs.get("atomic_numbers", state.atomic_numbers)
 
         model_output = model(
             positions=state.positions,
@@ -273,10 +273,9 @@ def nve(
             atomic_numbers=state.atomic_numbers,
         )
 
-        momenta = (
-            extra_state_kwargs.get("momenta")
-            if extra_state_kwargs.get("momenta") is not None
-            else calculate_momenta(state.positions, state.masses, kT, device, dtype, seed)
+        momenta = kwargs.get(
+            "momenta",
+            calculate_momenta(state.positions, state.masses, kT, device, dtype, seed),
         )
 
         initial_state = MDState(
@@ -378,7 +377,7 @@ def nvt_langevin(
         state: BaseState | StateDict,
         kT: torch.Tensor = kT,
         seed: int | None = None,
-        **extra_state_kwargs: Any,
+        **kwargs: Any,
     ) -> MDState:
         """Initialize an NVT Langevin state from input data.
 
@@ -387,7 +386,7 @@ def nvt_langevin(
                 masses, cell, pbc
             kT: Temperature in energy units for initializing momenta
             seed: Random seed for reproducibility
-            **extra_state_kwargs: Additional state arguments
+            **kwargs: Additional state arguments
 
         Returns:
             MDState: Initialized state for NVT Langevin integration
@@ -395,7 +394,7 @@ def nvt_langevin(
         if not isinstance(state, BaseState):
             state = BaseState(**state)
 
-        atomic_numbers = extra_state_kwargs.get("atomic_numbers", state.atomic_numbers)
+        atomic_numbers = kwargs.get("atomic_numbers", state.atomic_numbers)
 
         model_output = model(
             positions=state.positions,
@@ -403,10 +402,9 @@ def nvt_langevin(
             atomic_numbers=atomic_numbers,
         )
 
-        momenta = (
-            extra_state_kwargs.get("momenta")
-            if extra_state_kwargs.get("momenta") is not None
-            else calculate_momenta(state.positions, state.masses, kT, device, dtype, seed)
+        momenta = kwargs.get(
+            "momenta",
+            calculate_momenta(state.positions, state.masses, kT, device, dtype, seed),
         )
 
         initial_state = MDState(
@@ -797,7 +795,7 @@ def nvt_nose_hoover(
         - kT: Target temperature (optional, defaults to constructor value)
         - tau: Thermostat relaxation time (optional, defaults to 100*dt)
         - seed: Random seed for momenta initialization (optional)
-        - **extra_state_kwargs: Additional state variables
+        - **kwargs: Additional state variables
 
         The update function accepts:
         - state: Current NVTNoseHooverState
@@ -819,7 +817,7 @@ def nvt_nose_hoover(
         kT: torch.Tensor = kT,
         tau: torch.Tensor | None = None,
         seed: int | None = None,
-        **extra_state_kwargs: Any,
+        **kwargs: Any,
     ) -> NVTNoseHooverState:
         """Initialize the NVT Nose-Hoover state.
 
@@ -828,7 +826,7 @@ def nvt_nose_hoover(
             kT: Target temperature in energy units
             tau: Thermostat relaxation time (defaults to 100*dt)
             seed: Random seed for momenta initialization
-            **extra_state_kwargs: Additional state variables
+            **kwargs: Additional state variables
 
         Returns:
             Initialized NVTNoseHooverState with positions, momenta, forces,
@@ -846,17 +844,16 @@ def nvt_nose_hoover(
         if not isinstance(state, BaseState):
             state = BaseState(**state)
 
-        atomic_numbers = extra_state_kwargs.get("atomic_numbers", state.atomic_numbers)
+        atomic_numbers = kwargs.get("atomic_numbers", state.atomic_numbers)
 
         model_output = model(
             positions=state.positions,
             cell=state.cell,
             atomic_numbers=atomic_numbers,
         )
-        momenta = (
-            extra_state_kwargs.get("momenta")
-            if extra_state_kwargs.get("momenta") is not None
-            else calculate_momenta(state.positions, state.masses, kT, device, dtype, seed)
+        momenta = kwargs.get(
+            "momenta",
+            calculate_momenta(state.positions, state.masses, kT, device, dtype, seed),
         )
 
         # Calculate initial kinetic energy
@@ -961,24 +958,26 @@ def nvt_nose_hoover_invariant(
         - Useful for debugging thermostat behavior
     """
     # Calculate system energy terms
-    PE = state.energy
-    KE = kinetic_energy(state.momenta, state.masses)
+    e_pot = state.energy
+    e_kin = kinetic_energy(state.momenta, state.masses)
 
     # Get system degrees of freedom
     dof = count_dof(state.positions)
 
     # Start with system energy
-    E = PE + KE
+    e_tot = e_pot + e_kin
 
     # Add first thermostat term
     c = state.chain
-    E = E + c.momenta[0] ** 2 / (2 * c.masses[0]) + dof * kT * c.positions[0]
+    e_tot = e_tot + c.momenta[0] ** 2 / (2 * c.masses[0]) + dof * kT * c.positions[0]
 
     # Add remaining chain terms
-    for r, p, m in zip(c.positions[1:], c.momenta[1:], c.masses[1:], strict=True):
-        E = E + p**2 / (2 * m) + kT * r
+    for pos, momentum, mass in zip(
+        c.positions[1:], c.momenta[1:], c.masses[1:], strict=True
+    ):
+        e_tot = e_tot + momentum**2 / (2 * mass) + kT * pos
 
-    return E
+    return e_tot
 
 
 # TODO: Add NPT Nose-Hoover integrator with same interface as other integrators
@@ -1460,7 +1459,7 @@ def npt_nose_hoover(  # noqa: C901, PLR0915
         t_tau: torch.Tensor | None = None,
         b_tau: torch.Tensor | None = None,
         seed: int | None = None,
-        **extra_state_kwargs: Any,
+        **kwargs: Any,
     ) -> NPTNoseHooverState:
         """Initialize the NPT Nose-Hoover state.
 
@@ -1478,7 +1477,7 @@ def npt_nose_hoover(  # noqa: C901, PLR0915
             b_tau: Barostat relaxation time. Controls how quickly pressure equilibrates.
                 Defaults to 1000*dt
             seed: Random seed for momenta initialization. Used for reproducible runs
-            **extra_state_kwargs: Additional state variables like atomic_numbers or
+            **kwargs: Additional state variables like atomic_numbers or
                 pre-initialized momenta
 
         Returns:
@@ -1518,7 +1517,7 @@ def npt_nose_hoover(  # noqa: C901, PLR0915
             state = BaseState(**state)
 
         dim, n_particles = state.positions.shape
-        atomic_numbers = extra_state_kwargs.get("atomic_numbers", state.atomic_numbers)
+        atomic_numbers = kwargs.get("atomic_numbers", state.atomic_numbers)
 
         # Initialize box variables
         box_position = torch.zeros((), device=device, dtype=dtype)
@@ -1566,10 +1565,9 @@ def npt_nose_hoover(  # noqa: C901, PLR0915
         )
 
         # Initialize momenta
-        momenta = (
-            extra_state_kwargs.get("momenta")
-            if extra_state_kwargs.get("momenta") is not None
-            else calculate_momenta(state.positions, state.masses, kT, device, dtype, seed)
+        momenta = kwargs.get(
+            "momenta",
+            calculate_momenta(state.positions, state.masses, kT, device, dtype, seed),
         )
 
         # Initialize thermostat
@@ -1677,41 +1675,41 @@ def npt_nose_hoover_invariant(
     """
     # Calculate volume and potential energy
     volume = torch.det(state.current_box)
-    PE = state.energy
+    e_pot = state.energy
 
     # Calculate kinetic energy of particles
-    KE = kinetic_energy(state.momenta, state.masses)
+    e_kin = kinetic_energy(state.momenta, state.masses)
 
     # Total degrees of freedom
     DOF = state.positions.numel()
 
     # Initialize total energy with PE + KE
-    E = PE + KE
+    e_tot = e_pot + e_kin
 
     # Add thermostat chain contributions
-    E += (state.thermostat.momenta[0] ** 2) / (2 * state.thermostat.masses[0])
-    E += DOF * kT * state.thermostat.positions[0]
+    e_tot += (state.thermostat.momenta[0] ** 2) / (2 * state.thermostat.masses[0])
+    e_tot += DOF * kT * state.thermostat.positions[0]
 
     # Add remaining thermostat terms
-    for r, p, m in zip(
+    for pos, momentum, mass in zip(
         state.thermostat.positions[1:],
         state.thermostat.momenta[1:],
         state.thermostat.masses[1:],
         strict=True,
     ):
-        E += (p**2) / (2 * m) + kT * r
+        e_tot += (momentum**2) / (2 * mass) + kT * pos
 
     # Add barostat chain contributions
-    for r, p, m in zip(
+    for pos, momentum, mass in zip(
         state.barostat.positions,
         state.barostat.momenta,
         state.barostat.masses,
         strict=True,
     ):
-        E += (p**2) / (2 * m) + kT * r
+        e_tot += (momentum**2) / (2 * mass) + kT * pos
 
     # Add PV term and box kinetic energy
-    E += external_pressure * volume
-    E += (state.box_momentum**2) / (2 * state.box_mass)
+    e_tot += external_pressure * volume
+    e_tot += (state.box_momentum**2) / (2 * state.box_mass)
 
-    return E
+    return e_tot
