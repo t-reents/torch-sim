@@ -1,4 +1,4 @@
-"""Batched MACE unit cell filter with FIRE optimizer."""
+"""Batched MACE unit cell filter with gradient descent optimizer."""
 
 # /// script
 # dependencies = [
@@ -15,7 +15,7 @@ from mace.calculators.foundations_models import mace_mp
 
 from torch_sim.models.mace import MaceModel
 from torch_sim.neighbors import vesin_nl_ts
-from torch_sim.optimizers import unit_cell_fire
+from torch_sim.optimizers import unit_cell_gradient_descent
 from torch_sim.runners import atoms_to_state
 from torch_sim.units import UnitConversion
 
@@ -86,24 +86,29 @@ results = model(
     atomic_numbers=state.atomic_numbers,
     batch=state.batch,
 )
+# Use same learning rate for all batches
+positions_lr = 0.01
+cell_lr = 0.1
 
 # Initialize unit cell gradient descent optimizer
-fire_init, fire_update = unit_cell_fire(
+gd_init, gd_update = unit_cell_gradient_descent(
     model=model,
     cell_factor=None,  # Will default to atoms per batch
     hydrostatic_strain=False,
     constant_volume=False,
     scalar_pressure=0.0,
+    positions_lr=positions_lr,
+    cell_lr=cell_lr,
 )
 
-state = fire_init(state)
+state = gd_init(state)
 
 # Run optimization for a few steps
 print("\nRunning batched unit cell gradient descent:")
 for step in range(N_steps):
-    P1 = torch.trace(state.stress[0]) * UnitConversion.eV_per_Ang3_to_GPa / 3
-    P2 = torch.trace(state.stress[1]) * UnitConversion.eV_per_Ang3_to_GPa / 3
-    P3 = torch.trace(state.stress[2]) * UnitConversion.eV_per_Ang3_to_GPa / 3
+    P1 = -torch.trace(state.stress[0]) * UnitConversion.eV_per_Ang3_to_GPa / 3
+    P2 = -torch.trace(state.stress[1]) * UnitConversion.eV_per_Ang3_to_GPa / 3
+    P3 = -torch.trace(state.stress[2]) * UnitConversion.eV_per_Ang3_to_GPa / 3
 
     if step % 20 == 0:
         print(
@@ -111,7 +116,7 @@ for step in range(N_steps):
             f"P1={P1:.4f} GPa, P2={P2:.4f} GPa, P3={P3:.4f} GPa"
         )
 
-    state = fire_update(state)
+    state = gd_update(state)
 
 print(f"Initial energies: {[energy.item() for energy in results['energy']]} eV")
 print(f"Final energies: {[energy.item() for energy in state.energy]} eV")
