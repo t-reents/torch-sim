@@ -12,7 +12,7 @@ from torch_sim.autobatching import (
 )
 from torch_sim.models.lennard_jones import LennardJonesModel
 from torch_sim.optimizers import unit_cell_fire
-from torch_sim.state import BaseState, split_state
+from torch_sim.state import BaseState
 
 
 def test_calculate_scaling_metric(si_base_state: BaseState) -> None:
@@ -34,7 +34,7 @@ def test_calculate_scaling_metric(si_base_state: BaseState) -> None:
 
 def test_split_state(si_double_base_state: BaseState) -> None:
     """Test splitting a batched state into individual states."""
-    split_states = split_state(si_double_base_state)
+    split_states = si_double_base_state.split()
 
     # Check we get the right number of states
     assert len(split_states) == 2
@@ -373,7 +373,7 @@ def test_chunking_auto_batcher_with_fire(
         for _ in range(5):
             batch = fire_update(batch)
 
-        finished_states.extend(split_state(batch))
+        finished_states.extend(batch.split())
 
     restored_states = batcher.restore_original_order(finished_states)
     assert len(restored_states) == len(fire_states)
@@ -383,10 +383,10 @@ def test_chunking_auto_batcher_with_fire(
     assert n_batches == optimal_n_batches
 
 
-def test_hot_swapping_max_attempts(
+def test_hot_swapping_max_iterations(
     si_base_state: BaseState, fe_fcc_state: BaseState, lj_calculator: LennardJonesModel
 ) -> None:
-    """Test HotSwappingAutoBatcher with max_attempts limit."""
+    """Test HotSwappingAutoBatcher with max_iterations limit."""
     # Create states that won't naturally converge
     states = [si_base_state.clone(), fe_fcc_state.clone()]
 
@@ -396,7 +396,7 @@ def test_hot_swapping_max_attempts(
         model=lj_calculator,
         memory_scales_with="n_atoms",
         max_memory_scaler=800.0,
-        max_attempts=max_attempts,
+        max_iterations=max_attempts,
     )
     batcher.load_states(states)
 

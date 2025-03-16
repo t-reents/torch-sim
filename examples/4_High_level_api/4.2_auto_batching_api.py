@@ -21,12 +21,12 @@ from torch_sim.autobatching import (
     ChunkingAutoBatcher,
     HotSwappingAutoBatcher,
     calculate_memory_scaler,
-    split_state,
 )
 from torch_sim.integrators import nvt_langevin
+from torch_sim.io import atoms_to_state
 from torch_sim.models.mace import MaceModel
 from torch_sim.optimizers import unit_cell_fire
-from torch_sim.runners import atoms_to_state, generate_force_convergence_fn
+from torch_sim.runners import generate_force_convergence_fn
 from torch_sim.units import MetalUnits
 
 
@@ -118,4 +118,4 @@ for batch in batcher:
     for _ in range(100):
         batch = nvt_update(batch)
 
-    finished_states.extend(split_state(batch))
+    finished_states.extend(batch.split())

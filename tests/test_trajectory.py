@@ -6,10 +6,10 @@ import numpy as np
 import pytest
 import torch
 
+from torch_sim.integrators import MDState
 from torch_sim.models.lennard_jones import LennardJonesModel
-from torch_sim.state import BaseState, slice_substate
+from torch_sim.state import BaseState
 from torch_sim.trajectory import TorchSimTrajectory, TrajectoryReporter
-from torch_sim.unbatched.unbatched_integrators import MDState
 
 
 @pytest.fixture
@@ -621,7 +621,7 @@ def test_property_calculator_consistency(
     single_reporters = []
     for batch_idx in range(2):
         # Extract single batch states
-        single_state = slice_substate(si_double_base_state, batch_idx)
+        single_state = si_double_base_state[batch_idx]
         reporter = TrajectoryReporter(
             tmp_path / f"single_{batch_idx}.hdf5",
             state_frequency=1,
@@ -698,7 +698,7 @@ def test_reporter_with_model(
         energy = trajectory.get_array("energy")[0]
 
         # Calculate expected value
-        substate = slice_substate(si_double_base_state, batch_idx)
+        substate = si_double_base_state[batch_idx]
         expected = lj_calculator.forward(substate.positions, substate.cell)["energy"]
 
         # Compare

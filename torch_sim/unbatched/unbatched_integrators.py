@@ -9,11 +9,11 @@ import torch
 from torch_sim.quantities import count_dof, kinetic_energy
 from torch_sim.state import BaseState
 from torch_sim.transforms import pbc_wrap_general
-from torch_sim.utils.tools import calculate_momenta
 
 
 StateDict = dict[
-    Literal["positions", "masses", "cell", "pbc", "atomic_numbers", "batch"], torch.Tensor
+    Literal["positions", "masses", "cell", "pbc", "atomic_numbers", "batch"],
+    torch.Tensor,
 ]
 
 
@@ -48,6 +48,31 @@ class MDState(BaseState):
     def velocities(self) -> torch.Tensor:
         """Calculate velocities from momenta and masses."""
         return self.momenta / self.masses.unsqueeze(-1)
+
+
+def calculate_momenta(
+    positions: torch.Tensor,
+    masses: torch.Tensor,
+    kT: torch.Tensor,
+    device: torch.device,
+    dtype: torch.dtype,
+    seed: int | None = None,
+) -> torch.Tensor:
+    """Calculate momenta from positions and masses."""
+    generator = torch.Generator(device=device)
+    if seed is not None:
+        generator.manual_seed(seed)
+
+    # Generate random momenta from normal distribution
+    momenta = torch.randn(
+        positions.shape, device=device, dtype=dtype, generator=generator
+    ) * torch.sqrt(masses * kT).unsqueeze(-1)
+
+    # Center the momentum if more than one particle
+    if positions.shape[0] > 1:
+        momenta = momenta - torch.mean(momenta, dim=0, keepdim=True)
+
+    return momenta
 
 
 def initialize_momenta(

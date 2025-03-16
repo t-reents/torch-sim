@@ -4,8 +4,7 @@ import torch
 
 from torch_sim.models.interface import ModelInterface
 from torch_sim.neighbors import vesin_nl_ts
-from torch_sim.transforms import get_pair_displacements
-from torch_sim.utils.tools import safe_mask
+from torch_sim.transforms import get_pair_displacements, safe_mask
 
 
 # Default parameter values defined at module level
@@ -489,7 +488,10 @@ class UnbatchedSoftSphereMultiModel(torch.nn.Module):
         # Validate matrix shapes match number of species
         if sigma_matrix is not None and sigma_matrix.shape != (n_species, n_species):
             raise ValueError(f"sigma_matrix must have shape ({n_species}, {n_species})")
-        if epsilon_matrix is not None and epsilon_matrix.shape != (n_species, n_species):
+        if epsilon_matrix is not None and epsilon_matrix.shape != (
+            n_species,
+            n_species,
+        ):
             raise ValueError(f"epsilon_matrix must have shape ({n_species}, {n_species})")
         if alpha_matrix is not None and alpha_matrix.shape != (n_species, n_species):
             raise ValueError(f"alpha_matrix must have shape ({n_species}, {n_species})")
@@ -738,7 +740,10 @@ class SoftSphereMultiModel(torch.nn.Module):
         # Validate matrix shapes match number of species
         if sigma_matrix is not None and sigma_matrix.shape != (n_species, n_species):
             raise ValueError(f"sigma_matrix must have shape ({n_species}, {n_species})")
-        if epsilon_matrix is not None and epsilon_matrix.shape != (n_species, n_species):
+        if epsilon_matrix is not None and epsilon_matrix.shape != (
+            n_species,
+            n_species,
+        ):
             raise ValueError(f"epsilon_matrix must have shape ({n_species}, {n_species})")
         if alpha_matrix is not None and alpha_matrix.shape != (n_species, n_species):
             raise ValueError(f"alpha_matrix must have shape ({n_species}, {n_species})")

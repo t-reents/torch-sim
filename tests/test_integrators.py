@@ -2,11 +2,10 @@ from typing import Any
 
 import torch
 
-from torch_sim.integrators import batched_initialize_momenta, nve, nvt_langevin
+from torch_sim.integrators import MDState, batched_initialize_momenta, nve, nvt_langevin
 from torch_sim.models.lennard_jones import LennardJonesModel
 from torch_sim.quantities import temperature
-from torch_sim.state import BaseState, concatenate_states, slice_substate
-from torch_sim.unbatched.unbatched_integrators import MDState, initialize_momenta
+from torch_sim.state import BaseState, concatenate_states
 from torch_sim.units import MetalUnits
 
 
@@ -67,6 +66,8 @@ def batched_initialize_momenta_loop(
 
 
 def test_batched_initialize_momenta_loop():
+    from torch_sim.unbatched.unbatched_integrators import initialize_momenta
+
     # Set random seed for reproducibility
     seed = 42
 
@@ -116,6 +117,8 @@ def test_batched_initialize_momenta_loop():
 
 
 def test_batched_initialize_momenta():
+    from torch_sim.unbatched.unbatched_integrators import initialize_momenta
+
     seed = 42
     device = torch.device("cpu")
     dtype = torch.float64
@@ -273,8 +276,8 @@ def test_compare_single_vs_batched_integrators(
 
     # Check energy conservation
     ar_single_state = final_states["single"]
-    ar_batched_state_0 = slice_substate(final_states["batched"], 0)
-    ar_batched_state_1 = slice_substate(final_states["batched"], 1)
+    ar_batched_state_0 = final_states["batched"][0]
+    ar_batched_state_1 = final_states["batched"][1]
 
     for final_state in [ar_batched_state_0, ar_batched_state_1]:
         assert torch.allclose(ar_single_state.positions, final_state.positions)

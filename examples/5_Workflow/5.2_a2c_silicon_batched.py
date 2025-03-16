@@ -22,10 +22,10 @@ from pymatgen.analysis.structure_matcher import StructureMatcher
 from pymatgen.core import Composition, Element, Structure
 from tqdm import tqdm
 
+from torch_sim.io import state_to_structures, structures_to_state
 from torch_sim.models.mace import MaceModel, UnbatchedMaceModel
 from torch_sim.neighbors import vesin_nl_ts
 from torch_sim.quantities import temperature
-from torch_sim.runners import state_to_structures, structures_to_state
 from torch_sim.transforms import get_fractional_coordinates
 from torch_sim.unbatched.unbatched_integrators import (
     NVTNoseHooverState,
@@ -33,7 +33,7 @@ from torch_sim.unbatched.unbatched_integrators import (
     nvt_nose_hoover_invariant,
 )
 from torch_sim.units import MetalUnits as Units
-from torch_sim.utils.a2c import (
+from torch_sim.workflows.a2c import (
     get_subcells_to_crystallize,
     get_target_temperature,
     get_unit_cell_relaxed_structure_batched,

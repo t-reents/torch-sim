@@ -2,28 +2,14 @@ from typing import Any
 
 import numpy as np
 import torch
-from ase import Atoms
-from phonopy.structure.atoms import PhonopyAtoms
-from pymatgen.core import Structure
 
 from torch_sim.autobatching import ChunkingAutoBatcher, HotSwappingAutoBatcher
 from torch_sim.integrators import nve, nvt_langevin
 from torch_sim.models.lennard_jones import LennardJonesModel
 from torch_sim.optimizers import unit_cell_fire
 from torch_sim.quantities import kinetic_energy
-from torch_sim.runners import (
-    atoms_to_state,
-    generate_force_convergence_fn,
-    initialize_state,
-    integrate,
-    optimize,
-    phonopy_to_state,
-    state_to_atoms,
-    state_to_phonopy,
-    state_to_structures,
-    structures_to_state,
-)
-from torch_sim.state import BaseState, split_state
+from torch_sim.runners import generate_force_convergence_fn, integrate, optimize
+from torch_sim.state import BaseState, initialize_state
 from torch_sim.trajectory import TorchSimTrajectory, TrajectoryReporter
 from torch_sim.units import UnitSystem
 
@@ -224,7 +210,7 @@ def test_integrate_with_autobatcher(
     )
 
     assert isinstance(final_state, BaseState)
-    split_final_state = split_state(final_state)
+    split_final_state = final_state.split()
     for init_state, final_state in zip(states, split_final_state, strict=False):
         assert torch.all(final_state.atomic_numbers == init_state.atomic_numbers)
         assert torch.any(final_state.positions != init_state.positions)
@@ -279,7 +265,7 @@ def test_integrate_with_autobatcher_and_reporting(
     assert all(traj_file.exists() for traj_file in trajectory_files)
 
     assert isinstance(final_state, BaseState)
-    split_final_state = split_state(final_state)
+    split_final_state = final_state.split()
     for init_state, final_state in zip(states, split_final_state, strict=False):
         assert torch.all(final_state.atomic_numbers == init_state.atomic_numbers)
         assert torch.any(final_state.positions != init_state.positions)
@@ -387,30 +373,6 @@ def test_batched_optimize_fire(
     assert torch.all(final_state.forces < 1e-4)
 
 
-def test_single_structure_to_state(si_structure: Structure, device: torch.device) -> None:
-    """Test conversion from pymatgen Structure to state tensors."""
-    state = structures_to_state(si_structure, device, torch.float64)
-
-    # Check basic properties
-    assert isinstance(state, BaseState)
-    assert all(
-        t.device.type == device.type for t in [state.positions, state.masses, state.cell]
-    )
-    assert all(
-        t.dtype == torch.float64 for t in [state.positions, state.masses, state.cell]
-    )
-    assert state.atomic_numbers.dtype == torch.int
-
-    # Check shapes and values
-    assert state.positions.shape == (8, 3)
-    assert torch.allclose(state.masses, torch.full_like(state.masses, 28.0855))  # Si
-    assert torch.all(state.atomic_numbers == 14)  # Si atomic number
-    assert torch.allclose(
-        state.cell,
-        torch.diag(torch.full((3,), 5.43, device=device, dtype=torch.float64)),
-    )
-
-
 def test_optimize_with_autobatcher(
     ar_base_state: BaseState,
     fe_fcc_state: BaseState,
@@ -437,7 +399,7 @@ def test_optimize_with_autobatcher(
     )
 
     assert isinstance(final_state, BaseState)
-    split_final_state = split_state(final_state)
+    split_final_state = final_state.split()
     for init_state, final_state in zip(states, split_final_state, strict=False):
         assert torch.all(final_state.atomic_numbers == init_state.atomic_numbers)
         assert torch.any(final_state.positions != init_state.positions)
@@ -485,7 +447,7 @@ def test_optimize_with_autobatcher_and_reporting(
     assert all(traj_file.exists() for traj_file in trajectory_files)
 
     assert isinstance(final_state, BaseState)
-    split_final_state = split_state(final_state)
+    split_final_state = final_state.split()
     for init_state, final_state in zip(states, split_final_state, strict=False):
         assert torch.all(final_state.atomic_numbers == init_state.atomic_numbers)
         assert torch.any(final_state.positions != init_state.positions)
@@ -505,194 +467,6 @@ def test_optimize_with_autobatcher_and_reporting(
 
         assert torch.all(traj_state.atomic_numbers == init_state.atomic_numbers)
         assert torch.any(traj_state.positions != init_state.positions)
-
-
-def test_multiple_structures_to_state(
-    si_structure: Structure, device: torch.device
-) -> None:
-    """Test conversion from list of pymatgen Structure to state tensors."""
-    state = structures_to_state([si_structure, si_structure], device, torch.float64)
-
-    # Check basic properties
-    assert isinstance(state, BaseState)
-    assert state.positions.shape == (16, 3)
-    assert state.masses.shape == (16,)
-    assert state.cell.shape == (2, 3, 3)
-    assert state.pbc
-    assert state.atomic_numbers.shape == (16,)
-    assert state.batch.shape == (16,)
-    assert torch.all(
-        state.batch == torch.repeat_interleave(torch.tensor([0, 1], device=device), 8)
-    )
-
-
-def test_single_atoms_to_state(si_atoms: Atoms, device: torch.device) -> None:
-    """Test conversion from ASE Atoms to state tensors."""
-    state = atoms_to_state(si_atoms, device, torch.float64)
-
-    # Check basic properties
-    assert isinstance(state, BaseState)
-    assert state.positions.shape == (8, 3)
-    assert state.masses.shape == (8,)
-    assert state.cell.shape == (1, 3, 3)
-    assert state.pbc
-    assert state.atomic_numbers.shape == (8,)
-    assert state.batch.shape == (8,)
-    assert torch.all(state.batch == 0)
-
-
-def test_multiple_atoms_to_state(si_atoms: Atoms, device: torch.device) -> None:
-    """Test conversion from ASE Atoms to state tensors."""
-    state = atoms_to_state([si_atoms, si_atoms], device, torch.float64)
-
-    # Check basic properties
-    assert isinstance(state, BaseState)
-    assert state.positions.shape == (16, 3)
-    assert state.masses.shape == (16,)
-    assert state.cell.shape == (2, 3, 3)
-    assert state.pbc
-    assert state.atomic_numbers.shape == (16,)
-    assert state.batch.shape == (16,)
-    assert torch.all(
-        state.batch == torch.repeat_interleave(torch.tensor([0, 1], device=device), 8),
-    )
-
-
-def test_state_to_structure(ar_base_state: BaseState) -> None:
-    """Test conversion from state tensors to list of pymatgen Structure."""
-    structures = state_to_structures(ar_base_state)
-    assert len(structures) == 1
-    assert isinstance(structures[0], Structure)
-    assert len(structures[0]) == 32
-
-
-def test_state_to_multiple_structures(ar_double_base_state: BaseState) -> None:
-    """Test conversion from state tensors to list of pymatgen Structure."""
-    structures = state_to_structures(ar_double_base_state)
-    assert len(structures) == 2
-    assert isinstance(structures[0], Structure)
-    assert isinstance(structures[1], Structure)
-    assert len(structures[0]) == 32
-    assert len(structures[1]) == 32
-
-
-def test_state_to_atoms(ar_base_state: BaseState) -> None:
-    """Test conversion from state tensors to list of ASE Atoms."""
-    atoms = state_to_atoms(ar_base_state)
-    assert len(atoms) == 1
-    assert isinstance(atoms[0], Atoms)
-    assert len(atoms[0]) == 32
-
-
-def test_state_to_multiple_atoms(ar_double_base_state: BaseState) -> None:
-    """Test conversion from state tensors to list of ASE Atoms."""
-    atoms = state_to_atoms(ar_double_base_state)
-    assert len(atoms) == 2
-    assert isinstance(atoms[0], Atoms)
-    assert isinstance(atoms[1], Atoms)
-    assert len(atoms[0]) == 32
-    assert len(atoms[1]) == 32
-
-
-def test_initialize_state_from_structure(
-    si_structure: Structure, device: torch.device
-) -> None:
-    """Test conversion from pymatgen Structure to state tensors."""
-    state = initialize_state([si_structure], device, torch.float64)
-    assert isinstance(state, BaseState)
-    assert state.positions.shape == si_structure.cart_coords.shape
-    assert state.cell.shape[1:] == si_structure.lattice.matrix.shape
-
-
-def test_initialize_state_from_state(
-    ar_base_state: BaseState, device: torch.device
-) -> None:
-    """Test conversion from BaseState to BaseState."""
-    state = initialize_state(ar_base_state, device, torch.float64)
-    assert isinstance(state, BaseState)
-    assert state.positions.shape == ar_base_state.positions.shape
-    assert state.masses.shape == ar_base_state.masses.shape
-    assert state.cell.shape == ar_base_state.cell.shape
-
-
-def test_initialize_state_from_atoms(si_atoms: Atoms, device: torch.device) -> None:
-    """Test conversion from ASE Atoms to BaseState."""
-    state = initialize_state([si_atoms], device, torch.float64)
-    assert isinstance(state, BaseState)
-    assert state.positions.shape == si_atoms.positions.shape
-    assert state.masses.shape == si_atoms.get_masses().shape
-    assert state.cell.shape[1:] == si_atoms.cell.array.T.shape
-
-
-def test_to_atoms(ar_base_state: BaseState) -> None:
-    """Test conversion from BaseState to list of ASE Atoms."""
-    atoms = state_to_atoms(ar_base_state)
-    assert isinstance(atoms[0], Atoms)
-
-
-def test_to_structures(ar_base_state: BaseState) -> None:
-    """Test conversion from BaseState to list of Pymatgen Structure."""
-    structures = state_to_structures(ar_base_state)
-    assert isinstance(structures[0], Structure)
-
-
-def test_single_phonopy_to_state(si_phonopy_atoms: Any, device: torch.device) -> None:
-    """Test conversion from PhonopyAtoms to state tensors."""
-    state = phonopy_to_state(si_phonopy_atoms, device, torch.float64)
-
-    # Check basic properties
-    assert isinstance(state, BaseState)
-    assert all(
-        t.device.type == device.type for t in [state.positions, state.masses, state.cell]
-    )
-    assert all(
-        t.dtype == torch.float64 for t in [state.positions, state.masses, state.cell]
-    )
-    assert state.atomic_numbers.dtype == torch.int
-
-    # Check shapes and values
-    assert state.positions.shape == (8, 3)
-    assert torch.allclose(state.masses, torch.full_like(state.masses, 28.0855))  # Si
-    assert torch.all(state.atomic_numbers == 14)  # Si atomic number
-    assert torch.allclose(
-        state.cell,
-        torch.diag(torch.full((3,), 5.43, device=device, dtype=torch.float64)),
-    )
-
-
-def test_multiple_phonopy_to_state(si_phonopy_atoms: Any, device: torch.device) -> None:
-    """Test conversion from multiple PhonopyAtoms to state tensors."""
-    state = phonopy_to_state([si_phonopy_atoms, si_phonopy_atoms], device, torch.float64)
-
-    # Check basic properties
-    assert isinstance(state, BaseState)
-    assert state.positions.shape == (16, 3)
-    assert state.masses.shape == (16,)
-    assert state.cell.shape == (2, 3, 3)
-    assert state.pbc
-    assert state.atomic_numbers.shape == (16,)
-    assert state.batch.shape == (16,)
-    assert torch.all(
-        state.batch == torch.repeat_interleave(torch.tensor([0, 1], device=device), 8),
-    )
-
-
-def test_state_to_phonopy(ar_base_state: BaseState) -> None:
-    """Test conversion from state tensors to list of PhonopyAtoms."""
-    phonopy_atoms = state_to_phonopy(ar_base_state)
-    assert len(phonopy_atoms) == 1
-    assert isinstance(phonopy_atoms[0], PhonopyAtoms)
-    assert len(phonopy_atoms[0]) == 32
-
-
-def test_state_to_multiple_phonopy(ar_double_base_state: BaseState) -> None:
-    """Test conversion from state tensors to list of PhonopyAtoms."""
-    phonopy_atoms = state_to_phonopy(ar_double_base_state)
-    assert len(phonopy_atoms) == 2
-    assert isinstance(phonopy_atoms[0], PhonopyAtoms)
-    assert isinstance(phonopy_atoms[1], PhonopyAtoms)
-    assert len(phonopy_atoms[0]) == 32
-    assert len(phonopy_atoms[1]) == 32
 
 
 def test_integrate_with_default_autobatcher(
@@ -728,7 +502,7 @@ def test_integrate_with_default_autobatcher(
     )
 
     assert isinstance(final_state, BaseState)
-    split_final_state = split_state(final_state)
+    split_final_state = final_state.split()
 
     for init_state, final_state in zip(states, split_final_state, strict=False):
         assert torch.all(final_state.atomic_numbers == init_state.atomic_numbers)
@@ -766,7 +540,7 @@ def test_optimize_with_default_autobatcher(
     )
 
     assert isinstance(final_state, BaseState)
-    split_final_state = split_state(final_state)
+    split_final_state = final_state.split()
     for init_state, final_state in zip(states, split_final_state, strict=False):
         assert torch.all(final_state.atomic_numbers == init_state.atomic_numbers)
         assert torch.any(final_state.positions != init_state.positions)

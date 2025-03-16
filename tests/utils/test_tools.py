@@ -3,7 +3,7 @@
 import pytest
 import torch
 
-from torch_sim.utils.tools import (
+from torch_sim.transforms import (
     high_precision_sum,
     multiplicative_isotropic_cutoff,
     safe_mask,
