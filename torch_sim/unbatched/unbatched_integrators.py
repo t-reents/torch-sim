@@ -2,19 +2,13 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any
 
 import torch
 
 from torch_sim.quantities import count_dof, kinetic_energy
-from torch_sim.state import BaseState
+from torch_sim.state import BaseState, StateDict
 from torch_sim.transforms import pbc_wrap_general
-
-
-StateDict = dict[
-    Literal["positions", "masses", "cell", "pbc", "atomic_numbers", "batch"],
-    torch.Tensor,
-]
 
 
 @dataclass

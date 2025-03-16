@@ -2,18 +2,12 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any
 
 import torch
 
-from torch_sim.state import BaseState
+from torch_sim.state import BaseState, StateDict
 from torch_sim.unbatched.unbatched_optimizers import OptimizerState
-
-
-StateDict = dict[
-    Literal["positions", "masses", "cell", "pbc", "atomic_numbers", "batch"],
-    torch.Tensor,
-]
 
 
 @dataclass
@@ -63,12 +57,7 @@ def gradient_descent(
         atomic_numbers = kwargs.get("atomic_numbers", state.atomic_numbers)
 
         # Get initial forces and energy from model
-        model_output = model(
-            positions=state.positions,
-            cell=state.cell,
-            atomic_numbers=atomic_numbers,
-            batch=state.batch,
-        )
+        model_output = model(state)
         energy = model_output["energy"]
         forces = model_output["forces"]
 
@@ -103,12 +92,7 @@ def gradient_descent(
         state.positions = state.positions + atom_lr * state.forces
 
         # Get updated forces and energy from model
-        model_output = model(
-            positions=state.positions,
-            cell=state.cell,
-            atomic_numbers=state.atomic_numbers,
-            batch=state.batch,
-        )
+        model_output = model(state)
 
         # Update state with new forces and energy
         state.forces = model_output["forces"]
@@ -235,12 +219,7 @@ def unit_cell_gradient_descent(  # noqa: PLR0915, C901
         pressure = scalar_pressure * torch.eye(3, device=device)
 
         # Get initial forces and energy from model
-        model_output = model(
-            positions=state.positions,
-            cell=state.cell,
-            atomic_numbers=atomic_numbers,
-            batch=state.batch,
-        )
+        model_output = model(state)
         energy = model_output["energy"]
         forces = model_output["forces"]
         stress = model_output["stress"]  # Already shape: (n_batches, 3, 3)
@@ -357,17 +336,13 @@ def unit_cell_gradient_descent(  # noqa: PLR0915, C901
         cell_update = cell_positions_new / cell_factor_expanded
         new_cell = torch.bmm(state.reference_cell, cell_update.transpose(1, 2))
 
-        # Get new forces and energy
-        model_output = model(
-            positions=atomic_positions_new,
-            cell=new_cell,
-            atomic_numbers=state.atomic_numbers,
-            batch=state.batch,
-        )
-
         # Update state
         state.positions = atomic_positions_new
         state.cell = new_cell
+
+        # Get new forces and energy
+        model_output = model(state)
+
         state.energy = model_output["energy"]
         state.forces = model_output["forces"]
         state.stress = model_output["stress"]
@@ -554,7 +529,6 @@ def unit_cell_fire(  # noqa: C901, PLR0915
         scalar_pressure: float = scalar_pressure,
         dt_start: float = dt_start,
         alpha_start: float = alpha_start,
-        **kwargs: Any,
     ) -> BatchedUnitCellFireState:
         """Initialize a batched FIRE optimization state with unit cell.
 
@@ -572,8 +546,6 @@ def unit_cell_fire(  # noqa: C901, PLR0915
         """
         if not isinstance(state, BaseState):
             state = BaseState(**state)
-
-        atomic_numbers = kwargs.get("atomic_numbers", state.atomic_numbers)
 
         # Get dimensions
         n_batches = state.n_batches
@@ -598,12 +570,7 @@ def unit_cell_fire(  # noqa: C901, PLR0915
         pressure = pressure.unsqueeze(0).expand(n_batches, -1, -1)
 
         # Get initial forces and energy from model
-        model_output = model(
-            positions=state.positions,
-            cell=state.cell,
-            atomic_numbers=atomic_numbers,
-            batch=state.batch,
-        )
+        model_output = model(state)
 
         energy = model_output["energy"]  # [n_batches]
         forces = model_output["forces"]  # [n_total_atoms, 3]
@@ -727,21 +694,14 @@ def unit_cell_fire(  # noqa: C901, PLR0915
         cell_update = cell_positions_new / cell_factor_expanded
         new_cell = torch.bmm(state.orig_cell, cell_update.transpose(1, 2))
 
-        # Get new forces and energy
-        results = model(
-            positions=atomic_positions_new,
-            cell=new_cell,
-            atomic_numbers=state.atomic_numbers,
-            batch=state.batch,
-        )
-
         # Update state with new positions and cell
         state.positions = atomic_positions_new
         state.cell_positions = cell_positions_new
         state.cell = new_cell
-        state.energy = results["energy"]
 
-        # Combine new atomic forces and cell forces
+        # Get new forces, energy, and stress
+        results = model(state)
+        state.energy = results["energy"]
         forces = results["forces"]
         stress = results["stress"]
 

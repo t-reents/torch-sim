@@ -58,6 +58,11 @@ StateLike = Union[
     list[T],
 ]
 
+StateDict = dict[
+    Literal["positions", "masses", "cell", "pbc", "atomic_numbers", "batch"],
+    torch.Tensor,
+]
+
 
 # TODO: change later on
 @dataclass
@@ -241,6 +246,20 @@ class BaseState:
 
         return popped_states
 
+    def to(
+        self, device: torch.device | None = None, dtype: torch.dtype | None = None
+    ) -> Self:
+        """Convert the BaseState to a new device and dtype.
+
+        Args:
+            device: The device to convert to
+            dtype: The dtype to convert to
+
+        Returns:
+            A new BaseState object with the converted device and dtype
+        """
+        return state_to_device(self, device, dtype)
+
     def __getitem__(self, batch_indices: int | list[int] | slice | torch.Tensor) -> Self:
         """Enable standard Python indexing syntax for slicing batches.
 
@@ -292,7 +311,9 @@ def _normalize_batch_indices(
 
 
 def state_to_device(
-    state: BaseState, device: torch.device, dtype: torch.dtype | None = None
+    state: BaseState,
+    device: torch.device | None = None,
+    dtype: torch.dtype | None = None,
 ) -> Self:
     """Convert the BaseState to a new device and dtype.
 
@@ -304,6 +325,11 @@ def state_to_device(
     Returns:
         A new BaseState object with the converted device and dtype
     """
+    if device is None:
+        device = state.device
+    if dtype is None:
+        dtype = state.dtype
+
     attrs = vars(state)
     for attr_name, attr_value in attrs.items():
         if isinstance(attr_value, torch.Tensor):

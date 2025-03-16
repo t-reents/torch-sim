@@ -4,7 +4,7 @@ import os
 
 import torch
 
-from torch_sim.models.soft_sphere import SoftSphereModel
+from torch_sim.models.soft_sphere import UnbatchedSoftSphereModel
 from torch_sim.unbatched.unbatched_optimizers import fire
 
 
@@ -54,7 +54,9 @@ positions = positions * a_len
 
 # Create the cell tensor
 cell = torch.tensor(
-    [[4 * a_len, 0, 0], [0, 4 * a_len, 0], [0, 0, 4 * a_len]], device=device, dtype=dtype
+    [[4 * a_len, 0, 0], [0, 4 * a_len, 0], [0, 0, 4 * a_len]],
+    device=device,
+    dtype=dtype,
 )
 
 # Add random perturbation to the positions to start with non-equilibrium structure
@@ -69,7 +71,7 @@ atomic_numbers = torch.full((positions.shape[0],), 29, device=device, dtype=torc
 masses = torch.full((positions.shape[0],), 63.546, device=device, dtype=dtype)
 
 # Initialize the Soft Sphere model
-model = SoftSphereModel(
+model = UnbatchedSoftSphereModel(
     sigma=2.5,
     device=device,
     dtype=dtype,

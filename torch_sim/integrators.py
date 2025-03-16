@@ -2,18 +2,12 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any
 
 import torch
 
-from torch_sim.state import BaseState
+from torch_sim.state import BaseState, StateDict
 from torch_sim.transforms import pbc_wrap_batched
-
-
-StateDict = dict[
-    Literal["positions", "masses", "cell", "pbc", "atomic_numbers", "batch"],
-    torch.Tensor,
-]
 
 
 @dataclass
@@ -274,12 +268,7 @@ def nve(
         atomic_numbers = kwargs.get("atomic_numbers", state.atomic_numbers)
         batch = kwargs.get("batch", state.batch)
 
-        model_output = model(
-            positions=state.positions,
-            cell=state.cell,
-            batch=state.batch,
-            atomic_numbers=state.atomic_numbers,
-        )
+        model_output = model(state)
 
         momenta = kwargs.get(
             "momenta", calculate_momenta(state.positions, state.masses, kT, seed)
@@ -324,12 +313,7 @@ def nve(
         state = momentum_step(state, dt / 2)
         state = position_step(state, dt)
 
-        model_output = model(
-            positions=state.positions,
-            cell=state.cell,
-            batch=state.batch,
-            atomic_numbers=state.atomic_numbers,
-        )
+        model_output = model(state)
         state.energy = model_output["energy"]
         state.forces = model_output["forces"]
 
@@ -394,12 +378,7 @@ def nvt_langevin(
         atomic_numbers = kwargs.get("atomic_numbers", state.atomic_numbers)
         batch = kwargs.get("batch", state.batch)
 
-        model_output = model(
-            positions=state.positions,
-            cell=state.cell,
-            batch=batch,
-            atomic_numbers=atomic_numbers,
-        )
+        model_output = model(state)
 
         momenta = getattr(
             state, "momenta", calculate_momenta(state.positions, state.masses, kT, seed)
@@ -455,12 +434,7 @@ def nvt_langevin(
         state = stochastic_step(state, dt, kT, gamma)
         state = position_step(state, dt / 2)
 
-        model_output = model(
-            positions=state.positions,
-            cell=state.cell,
-            batch=state.batch,
-            atomic_numbers=state.atomic_numbers,
-        )
+        model_output = model(state)
         state.energy = model_output["energy"]
         state.forces = model_output["forces"]
 
