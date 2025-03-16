@@ -6,12 +6,12 @@ from ase.build import bulk
 
 from torch_sim.io import atoms_to_state
 from torch_sim.models.interface import validate_model_outputs
-from torch_sim.models.lennard_jones import (
+from torch_sim.state import BaseState
+from torch_sim.unbatched.models.lennard_jones import (
     UnbatchedLennardJonesModel,
     lennard_jones_pair,
     lennard_jones_pair_force,
 )
-from torch_sim.state import BaseState
 
 
 def test_lennard_jones_pair_minimum() -> None:
@@ -166,8 +166,7 @@ def calculators(
         use_neighbor_list=False, cutoff=cutoff, **calc_params
     )
 
-    positions, cell = ar_base_state_large.positions, ar_base_state_large.cell.squeeze(0)
-    return calc_nl(positions, cell), calc_direct(positions, cell)
+    return calc_nl(ar_base_state_large), calc_direct(ar_base_state_large)
 
 
 def test_energy_match(

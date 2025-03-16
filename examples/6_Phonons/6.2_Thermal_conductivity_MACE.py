@@ -19,8 +19,9 @@ from pymatgen.core.lattice import Lattice
 from pymatgen.core.structure import Structure
 from pymatgen.io.phonopy import get_phonopy_structure
 
-from torch_sim.models.mace import UnbatchedMaceModel
 from torch_sim.neighbors import vesin_nl_ts
+from torch_sim.state import BaseState
+from torch_sim.unbatched.models.mace import UnbatchedMaceModel
 
 
 # Set device and data type
@@ -69,7 +70,14 @@ for displacement in ph3.supercells_with_displacements:
     positions = torch.tensor(displacement.get_positions(), device=device, dtype=dtype)
     cell = torch.tensor(displacement.get_cell(), device=device, dtype=dtype)
     atomic_numbers = torch.tensor(displacement.numbers, device=device, dtype=torch.int)
-    results = model(positions=positions, cell=cell, atomic_numbers=atomic_numbers)
+    state = BaseState(
+        positions=positions,
+        cell=cell,
+        pbc=True,
+        masses=torch.ones_like(atomic_numbers),
+        atomic_numbers=atomic_numbers,
+    )
+    results = model(state)
     set_of_forces.append(results["forces"].detach().cpu().numpy())
 
 forces_time = time.perf_counter() - start_time

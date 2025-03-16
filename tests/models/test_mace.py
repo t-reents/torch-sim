@@ -6,8 +6,9 @@ from mace.calculators.foundations_models import mace_mp
 
 from torch_sim.io import atoms_to_state
 from torch_sim.models.interface import validate_model_outputs
-from torch_sim.models.mace import MaceModel, UnbatchedMaceModel
+from torch_sim.models.mace import MaceModel
 from torch_sim.neighbors import wrapping_nl
+from torch_sim.unbatched.models.mace import UnbatchedMaceModel
 
 
 mace_model = mace_mp(model="small", return_raw_model=True)
@@ -72,9 +73,7 @@ def test_mace_consistency(
 
     # Get FairChem results
     torchsim_mace_results = torchsim_mace_model(
-        positions=si_system["positions"],
-        cell=si_system["cell"],
-        atomic_numbers=si_system["atomic_numbers"],
+        atoms_to_state([si_system["ase_atoms"]], device, torch.float32)
     )
 
     # Get OCP results

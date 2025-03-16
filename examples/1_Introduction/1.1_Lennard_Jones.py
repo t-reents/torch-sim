@@ -2,7 +2,7 @@
 
 import torch
 
-from torch_sim.models.lennard_jones import UnbatchedLennardJonesModel
+from torch_sim.unbatched.models.lennard_jones import UnbatchedLennardJonesModel
 
 
 # Set up the device and data type
@@ -70,8 +70,13 @@ model = UnbatchedLennardJonesModel(
 print(f"Positions: {positions.shape}")
 print(f"Cell: {cell.shape}")
 
+state = dict(
+    positions=positions,
+    cell=cell,
+    atomic_numbers=atomic_numbers,
+)
 # Run the simulation and get results
-results = model(positions=positions, cell=cell, atomic_numbers=atomic_numbers)
+results = model(state)
 
 # Print the results
 print(f"Energy: {results['energy']}")

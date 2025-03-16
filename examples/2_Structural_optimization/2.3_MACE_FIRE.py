@@ -13,8 +13,9 @@ import torch
 from ase.build import bulk
 from mace.calculators.foundations_models import mace_mp
 
-from torch_sim.models.mace import UnbatchedMaceModel
 from torch_sim.neighbors import vesin_nl_ts
+from torch_sim.state import BaseState
+from torch_sim.unbatched.models.mace import UnbatchedMaceModel
 from torch_sim.unbatched.unbatched_optimizers import fire
 
 
@@ -62,17 +63,17 @@ model = UnbatchedMaceModel(
     dtype=dtype,
     enable_cueq=False,
 )
+state = BaseState(
+    positions=positions,
+    masses=masses,
+    cell=cell,
+    pbc=PERIODIC,
+    atomic_numbers=atomic_numbers,
+)
 
 # Run initial inference
-results = model(positions=positions, cell=cell, atomic_numbers=atomic_numbers)
+results = model(state)
 
-state = {
-    "positions": positions,
-    "masses": masses,
-    "cell": cell,
-    "pbc": PERIODIC,
-    "atomic_numbers": atomic_numbers,
-}
 # Initialize FIRE optimizer for structural relaxation
 fire_init, fire_update = fire(model=model)
 state = fire_init(state=state)

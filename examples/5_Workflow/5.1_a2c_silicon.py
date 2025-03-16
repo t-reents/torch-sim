@@ -23,10 +23,10 @@ from pymatgen.core import Composition, Element, Structure
 from tqdm import tqdm
 
 from torch_sim.io import state_to_structures, structures_to_state
-from torch_sim.models.mace import UnbatchedMaceModel
 from torch_sim.neighbors import vesin_nl_ts
 from torch_sim.quantities import temperature
 from torch_sim.transforms import get_fractional_coordinates
+from torch_sim.unbatched.models.mace import UnbatchedMaceModel
 from torch_sim.unbatched.unbatched_integrators import (
     NVTNoseHooverState,
     nvt_nose_hoover,
@@ -207,7 +207,7 @@ pymatgen_struct_list = [
     for struct in candidate_structures
 ]
 # Make sure to compute stress
-model.compute_stress = True
+model._compute_stress = True  # noqa: SLF001
 
 start_time = time.perf_counter()
 pymatgen_relaxed_struct_list = []

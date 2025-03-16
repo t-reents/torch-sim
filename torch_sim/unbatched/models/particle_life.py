@@ -2,7 +2,9 @@
 
 import torch
 
+from torch_sim.models.interface import ModelInterface
 from torch_sim.neighbors import vesin_nl_ts
+from torch_sim.state import BaseState
 from torch_sim.transforms import get_pair_displacements
 
 
@@ -80,7 +82,7 @@ def asymmetric_particle_pair_force_jit(
     return inner_forces + outer_forces
 
 
-class UnbatchedParticleLifeModel(torch.nn.Module):
+class UnbatchedParticleLifeModel(torch.nn.Module, ModelInterface):
     """Calculator for asymmetric particle interaction."""
 
     def __init__(
@@ -100,41 +102,50 @@ class UnbatchedParticleLifeModel(torch.nn.Module):
     ) -> None:
         """Initialize the calculator."""
         super().__init__()
-        self.device = device or torch.device("cpu")
-        self.dtype = dtype
-        self.periodic = periodic
-        self.compute_force = compute_force
-        self.compute_stress = compute_stress
-        self.per_atom_energies = per_atom_energies
-        self.per_atom_stresses = per_atom_stresses
+        self._device = device or torch.device("cpu")
+        self._dtype = dtype
+
+        self._compute_force = compute_force
+        self._compute_stress = compute_stress
+        self._per_atom_energies = per_atom_energies
+        self._per_atom_stresses = per_atom_stresses
+
         self.use_neighbor_list = use_neighbor_list
+        self.periodic = periodic
 
         # Convert parameters to tensors
-        self.sigma = torch.tensor(sigma, dtype=dtype, device=self.device)
-        self.cutoff = torch.tensor(cutoff or 2.5 * sigma, dtype=dtype, device=self.device)
-        self.epsilon = torch.tensor(epsilon, dtype=dtype, device=self.device)
+        self.sigma = torch.tensor(sigma, dtype=self._dtype, device=self._device)
+        self.cutoff = torch.tensor(
+            cutoff or 2.5 * sigma, dtype=self._dtype, device=self._device
+        )
+        self.epsilon = torch.tensor(epsilon, dtype=self._dtype, device=self._device)
 
-    def forward(
-        self, positions: torch.Tensor, cell: torch.Tensor | None = None
-    ) -> dict[str, torch.Tensor]:
+    def forward(self, state: BaseState) -> dict[str, torch.Tensor]:
         """Compute energies and forces."""
-        positions = positions.to(device=self.device, dtype=self.dtype)
-        if cell is not None:
-            cell = cell.to(device=self.device, dtype=self.dtype)
+        # Extract required data from input
+        if not isinstance(state, BaseState):
+            state = BaseState(
+                **state, pbc=self.periodic, masses=torch.ones_like(state["positions"])
+            )
+        elif state.pbc != self.periodic:
+            raise ValueError("PBC mismatch between model and state")
+
+        if state.cell.dim() == 3:  # Check if there is an extra batch dimension
+            state.cell = state.cell.squeeze(0)  # Squeeze the first dimension
 
         if self.use_neighbor_list:
             # Get neighbor list using wrapping_nl
             mapping, shifts = vesin_nl_ts(
-                positions=positions,
-                cell=cell,
+                positions=state.positions,
+                cell=state.cell,
                 pbc=self.periodic,
                 cutoff=float(self.cutoff),
                 sort_id=False,
             )
             # Get displacements using neighbor list
             dr_vec, distances = get_pair_displacements(
-                positions=positions,
-                cell=cell,
+                positions=state.positions,
+                cell=state.cell,
                 pbc=self.periodic,
                 pairs=mapping,
                 shifts=shifts,
@@ -142,12 +153,14 @@ class UnbatchedParticleLifeModel(torch.nn.Module):
         else:
             # Get all pairwise displacements
             dr_vec, distances = get_pair_displacements(
-                positions=positions,
-                cell=cell,
+                positions=state.positions,
+                cell=state.cell,
                 pbc=self.periodic,
             )
             # Mask out self-interactions
-            mask = torch.eye(positions.shape[0], dtype=torch.bool, device=self.device)
+            mask = torch.eye(
+                state.positions.shape[0], dtype=torch.bool, device=self.device
+            )
             distances = distances.masked_fill(mask, float("inf"))
             # Apply cutoff
             mask = distances < self.cutoff
@@ -174,7 +187,7 @@ class UnbatchedParticleLifeModel(torch.nn.Module):
         force_vectors = (pair_forces / distances)[:, None] * dr_vec
 
         # Initialize forces tensor
-        forces = torch.zeros_like(positions)
+        forces = torch.zeros_like(state.positions)
         # Add force contributions (f_ij on i, -f_ij on j)
         forces.index_add_(0, mapping[0], -force_vectors)
         forces.index_add_(0, mapping[1], force_vectors)
