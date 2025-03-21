@@ -170,8 +170,9 @@ def integrate(
         model=model,
         kT=torch.tensor(temps[0] * unit_system.temperature, dtype=dtype, device=device),
         dt=torch.tensor(timestep * unit_system.time, dtype=dtype, device=device),
+        **integrator_kwargs,
     )
-    state = init_fn(state, **integrator_kwargs)
+    state = init_fn(state)
 
     batch_iterator = _configure_batches_iterator(model, state, autobatcher)
 
@@ -309,10 +310,8 @@ def optimize(
 
     # initialize the state
     state: SimState = initialize_state(system, model.device, model.dtype)
-    init_fn, update_fn = optimizer(
-        model=model,
-    )
-    state = init_fn(state, **optimizer_kwargs)
+    init_fn, update_fn = optimizer(model=model, **optimizer_kwargs)
+    state = init_fn(state)
 
     max_attempts = max_steps // steps_between_swaps
     autobatcher = _configure_hot_swapping_autobatcher(
@@ -320,7 +319,7 @@ def optimize(
     )
 
     step: int = 1
-    last_energy = state.energy + 1
+    last_energy = None
     all_converged_states, convergence_tensor = [], None
     og_filenames = trajectory_reporter.filenames if trajectory_reporter else None
     while (result := autobatcher.next_batch(state, convergence_tensor))[0] is not None:
@@ -334,8 +333,9 @@ def optimize(
             )
 
         for _step in range(steps_between_swaps):
-            state = update_fn(state)
             last_energy = state.energy
+
+            state = update_fn(state)
 
             if trajectory_reporter:
                 trajectory_reporter.report(state, step, model=model)

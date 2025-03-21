@@ -2,7 +2,6 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
 
 import torch
 
@@ -179,6 +178,7 @@ def nve(
     *,
     dt: torch.Tensor,
     kT: torch.Tensor,
+    seed: int | None = None,
 ) -> tuple[
     Callable[[SimState | StateDict, torch.Tensor], MDState],
     Callable[[MDState, torch.Tensor], MDState],
@@ -193,6 +193,7 @@ def nve(
         model: Neural network model that computes energies and forces
         dt: Integration timestep
         kT: Temperature in energy units
+        seed: Random seed for reproducibility
 
     Returns:
         tuple:
@@ -209,8 +210,7 @@ def nve(
     def nve_init(
         state: SimState | StateDict,
         kT: torch.Tensor = kT,
-        seed: int | None = None,
-        **kwargs: Any,
+        seed: int | None = seed,
     ) -> MDState:
         """Initialize an NVE state from input data.
 
@@ -228,14 +228,10 @@ def nve(
         if not isinstance(state, SimState):
             state = SimState(**state)
 
-        # Override with kwargs if provided
-        atomic_numbers = kwargs.get("atomic_numbers", state.atomic_numbers)
-        batch = kwargs.get("batch", state.batch)
-
         model_output = model(state)
 
-        momenta = kwargs.get(
-            "momenta", calculate_momenta(state.positions, state.masses, kT, seed)
+        momenta = getattr(
+            state, "momenta", calculate_momenta(state.positions, state.masses, kT, seed)
         )
 
         initial_state = MDState(
@@ -246,8 +242,8 @@ def nve(
             masses=state.masses,
             cell=state.cell,
             pbc=state.pbc,
-            batch=batch,
-            atomic_numbers=atomic_numbers,
+            batch=state.batch,
+            atomic_numbers=state.atomic_numbers,
         )
         return initial_state  # noqa: RET504
 
@@ -292,6 +288,7 @@ def nvt_langevin(
     dt: torch.Tensor,
     kT: torch.Tensor,
     gamma: torch.Tensor | None = None,
+    seed: int | None = None,
 ) -> tuple[
     Callable[[SimState | StateDict, torch.Tensor], MDState],
     Callable[[MDState, torch.Tensor], MDState],
@@ -307,6 +304,7 @@ def nvt_langevin(
         dt: Integration timestep
         kT: Target temperature in energy units
         gamma: Friction coefficient for Langevin thermostat
+        seed: Random seed for reproducibility
 
     Returns:
         tuple:
@@ -369,8 +367,7 @@ def nvt_langevin(
     def langevin_init(
         state: SimState | StateDict,
         kT: torch.Tensor = kT,
-        seed: int | None = None,
-        **kwargs: Any,
+        seed: int | None = seed,
     ) -> MDState:
         """Initialize an NVT state from input data.
 
@@ -387,9 +384,6 @@ def nvt_langevin(
         if not isinstance(state, SimState):
             state = SimState(**state)
 
-        atomic_numbers = kwargs.get("atomic_numbers", state.atomic_numbers)
-        batch = kwargs.get("batch", state.batch)
-
         model_output = model(state)
 
         momenta = getattr(
@@ -401,8 +395,8 @@ def nvt_langevin(
             masses=state.masses,
             cell=state.cell,
             pbc=state.pbc,
-            batch=batch,
-            atomic_numbers=atomic_numbers,
+            batch=state.batch,
+            atomic_numbers=state.atomic_numbers,
             momenta=momenta,
             energy=model_output["energy"],
             forces=model_output["forces"],
@@ -506,6 +500,7 @@ def npt_langevin(  # noqa: C901, PLR0915
     alpha: torch.Tensor | None = None,
     cell_alpha: torch.Tensor | None = None,
     b_tau: torch.Tensor | None = None,
+    seed: int | None = None,
 ) -> tuple[
     Callable[[SimState | StateDict, torch.Tensor], NPTLangevinState],
     Callable[[NPTLangevinState, torch.Tensor], NPTLangevinState],
@@ -525,7 +520,7 @@ def npt_langevin(  # noqa: C901, PLR0915
         alpha: Friction coefficient for particle Langevin thermostat
         cell_alpha: Friction coefficient for cell Langevin thermostat
         b_tau: Barostat time constant
-
+        seed: Random seed for reproducibility
     Returns:
         tuple:
             - callable: Function to initialize the NPTLangevinState from input data
@@ -961,8 +956,7 @@ def npt_langevin(  # noqa: C901, PLR0915
     def npt_init(
         state: SimState | StateDict,
         kT: torch.Tensor = kT,
-        seed: int | None = None,
-        **kwargs: Any,
+        seed: int | None = seed,
     ) -> NPTLangevinState:
         """Initialize an NPT Langevin state from input data.
 
@@ -981,10 +975,6 @@ def npt_langevin(  # noqa: C901, PLR0915
         """
         if not isinstance(state, SimState):
             state = SimState(**state)
-
-        # Override with kwargs if provided
-        atomic_numbers = kwargs.get("atomic_numbers", state.atomic_numbers)
-        batch = kwargs.get("batch", state.batch)
 
         # Get model output to initialize forces and stress
         model_output = model(state)
@@ -1025,8 +1015,8 @@ def npt_langevin(  # noqa: C901, PLR0915
             masses=state.masses,
             cell=state.cell,
             pbc=state.pbc,
-            batch=batch,
-            atomic_numbers=atomic_numbers,
+            batch=state.batch,
+            atomic_numbers=state.atomic_numbers,
             reference_cell=reference_cell,
             cell_positions=cell_positions,
             cell_velocities=cell_velocities,
@@ -1094,8 +1084,9 @@ def npt_langevin(  # noqa: C901, PLR0915
 
         # Update cell (currently only isotropic fluctuations)
         dim = state.positions.shape[1]  # Usually 3 for 3D
-        V_0 = torch.linalg.det(state.reference_cell)  # shape: (n_batches,)
-        V = state.cell_positions.reshape(state.n_batches, -1)[:, 0]  # shape: (n_batches,)
+        # V_0 and V are shape: (n_batches,)
+        V_0 = torch.linalg.det(state.reference_cell)
+        V = state.cell_positions.reshape(state.n_batches, -1)[:, 0]
 
         # Scale cell uniformly in all dimensions
         scaling = (V / V_0) ** (1.0 / dim)  # shape: (n_batches,)

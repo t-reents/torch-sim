@@ -163,6 +163,8 @@ def unit_cell_gradient_descent(  # noqa: PLR0915, C901
     parameters along with atomic positions. It supports hydrostatic strain constraints,
     constant volume constraints, and external pressure.
 
+    To fix the cell, set constant_volume=True and hydrostatic_strain=True.
+
     Args:
         model: Neural network model that computes energies, forces, and stress
         positions_lr: Learning rate for atomic positions optimization
@@ -193,7 +195,6 @@ def unit_cell_gradient_descent(  # noqa: PLR0915, C901
         hydrostatic_strain: bool = hydrostatic_strain,  # noqa: FBT001
         constant_volume: bool = constant_volume,  # noqa: FBT001
         scalar_pressure: float = scalar_pressure,
-        **kwargs: Any,
     ) -> BatchedUnitCellGDState:
         """Initialize the batched gradient descent optimization state with unit cell.
 
@@ -210,8 +211,6 @@ def unit_cell_gradient_descent(  # noqa: PLR0915, C901
         """
         if not isinstance(state, SimState):
             state = SimState(**state)
-
-        atomic_numbers = kwargs.get("atomic_numbers", state.atomic_numbers)
 
         # Setup cell_factor
         if cell_factor is None:
@@ -293,7 +292,7 @@ def unit_cell_gradient_descent(  # noqa: PLR0915, C901
             hydrostatic_strain=hydrostatic_strain,
             constant_volume=constant_volume,
             pressure=pressure,
-            atomic_numbers=atomic_numbers,
+            atomic_numbers=state.atomic_numbers,
             batch=state.batch,
             cell_positions=cell_positions,
             cell_forces=cell_forces,
@@ -541,7 +540,6 @@ def unit_cell_fire(  # noqa: C901, PLR0915
             scalar_pressure: Applied pressure in energy units
             dt_start: Initial timestep per batch
             alpha_start: Initial mixing parameter per batch
-            **kwargs: Additional state attribute overrides
 
         Returns:
             BatchedUnitCellFireState with initialized optimization tensors
@@ -920,7 +918,6 @@ def frechet_cell_fire(  # noqa: C901, PLR0915
         scalar_pressure: float = scalar_pressure,
         dt_start: float = dt_start,
         alpha_start: float = alpha_start,
-        **kwargs: Any,
     ) -> BatchedFrechetCellFIREState:
         """Initialize a batched FIRE optimization state with Frechet cell
         parameterization.
@@ -939,8 +936,6 @@ def frechet_cell_fire(  # noqa: C901, PLR0915
         """
         if not isinstance(state, SimState):
             state = SimState(**state)
-
-        atomic_numbers = kwargs.get("atomic_numbers", state.atomic_numbers)
 
         # Get dimensions
         n_batches = state.n_batches
@@ -1021,7 +1016,7 @@ def frechet_cell_fire(  # noqa: C901, PLR0915
             positions=state.positions,
             masses=state.masses,
             cell=state.cell,
-            atomic_numbers=atomic_numbers,
+            atomic_numbers=state.atomic_numbers,
             batch=state.batch,
             pbc=state.pbc,
             # New attributes
