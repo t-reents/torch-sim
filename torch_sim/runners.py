@@ -2,7 +2,7 @@
 
 This module provides functions for running molecular dynamics simulations and geometry
 optimizations using various models and integrators. It includes utilities for
-converting between different molecular representations and handling simulation state.
+converting between different atomistic representations and handling simulation state.
 """
 
 import warnings
@@ -210,7 +210,7 @@ def _configure_hot_swapping_autobatcher(
     model: ModelInterface,
     state: SimState,
     autobatcher: HotSwappingAutoBatcher | bool,
-    max_attempts: int,
+    max_attempts: int,  # TODO: change name to max_iterations
 ) -> HotSwappingAutoBatcher:
     """Configure the hot swapping autobatcher for the optimize function.
 
@@ -229,8 +229,12 @@ def _configure_hot_swapping_autobatcher(
         autobatcher.max_attempts = max_attempts
         autobatcher.load_states(state)
     else:
-        memory_scales_with = getattr(model, "memory_scales_with", "n_atoms")
-        max_memory_scaler = None if autobatcher else state.n_atoms + 1
+        if autobatcher:
+            memory_scales_with = model.memory_scales_with
+            max_memory_scaler = None
+        else:
+            memory_scales_with = "n_atoms"
+            max_memory_scaler = state.n_atoms + 1
         autobatcher = HotSwappingAutoBatcher(
             model=model,
             return_indices=True,

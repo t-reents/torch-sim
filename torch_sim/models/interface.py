@@ -1,17 +1,68 @@
-"""Interface for all TorchSim models."""
+"""Model Interface: Core interfaces for all simulation models in torchsim.
+
+This module defines the abstract base class that all torchsim models must implement.
+It establishes a common API for interacting with different force and energy models,
+ensuring consistent behavior regardless of the underlying implementation. The module
+also provides validation utilities to verify model conformance to the interface.
+
+Examples:
+    ```python
+    # Creating a custom model that implements the interface
+    class MyModel(ModelInterface):
+        def __init__(self, device=None, dtype=torch.float64):
+            self._device = device or torch.device(
+                "cuda" if torch.cuda.is_available() else "cpu"
+            )
+            self._dtype = dtype
+            self._compute_stress = True
+            self._compute_force = True
+
+        def forward(self, positions, cell, batch, atomic_numbers=None, **kwargs):
+            # Implementation that returns energy, forces, and stress
+            return {"energy": energy, "forces": forces, "stress": stress}
+    ```
+
+Notes:
+    Models must explicitly declare support for stress computation through the
+    compute_stress property, as some integrators require stress calculations.
+"""
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Self
+from typing import Literal, Self
 
 import torch
 
+from torch_sim.state import SimState, StateDict
+
 
 class ModelInterface(ABC):
-    """Interface for all TorchSim models.
+    """Abstract base class for all simulation models in torchsim.
 
-    This interface provides a common structure for all models in TorchSim.
-    It ensures that all models implement the required methods and properties.
+    This interface provides a common structure for all energy and force models,
+    ensuring they implement the required methods and properties. It defines how
+    models should process atomic positions and system information to compute energies,
+    forces, and stresses.
+
+    Attributes:
+        device (torch.device): Device where the model runs computations.
+        dtype (torch.dtype): Data type used for tensor calculations.
+        compute_stress (bool): Whether the model calculates stress tensors.
+        compute_force (bool): Whether the model calculates atomic forces.
+
+    Examples:
+        ```python
+        # Using a model that implements ModelInterface
+        model = LennardJonesModel(device=torch.device("cuda"))
+
+        # Forward pass with a simulation state
+        output = model(sim_state)
+
+        # Access computed properties
+        energy = output["energy"]  # Shape: [n_batches]
+        forces = output["forces"]  # Shape: [n_atoms, 3]
+        stress = output["stress"]  # Shape: [n_batches, 3, 3]
+        ```
     """
 
     @abstractmethod
@@ -20,26 +71,30 @@ class ModelInterface(ABC):
         model: str | Path | torch.nn.Module | None = None,
         device: torch.device | None = None,
         dtype: torch.dtype = torch.float64,
-        atomic_numbers: torch.Tensor | None = None,
-        batch: torch.Tensor | None = None,
         **kwargs,
     ) -> Self:
-        """Abstract base class for all models that provides implementation guidelines.
-        All models should inherit from this class.
+        """Initialize a model implementation.
 
-        Within the __init__ method, the model must set self._device and self._dtype.
+        Implementations must set device, dtype and compute capability flags
+        to indicate what operations the model supports. Models may optionally
+        load parameters from a file or existing module.
 
-        If the model must be loaded from a file, it should accept a model argument.
-        That argument can be a path to a model checkpoint or a torch.nn.Module.
-        Implemented models should support both cases and raise an error if the wrong
-        type of argument is provided.
+        Args:
+            model (str | Path | torch.nn.Module | None): Model specification, which
+                can be:
+                - Path to a model checkpoint or model file
+                - Pre-configured torch.nn.Module
+                - None for default initialization
+                Defaults to None.
+            device (torch.device | None): Device where the model will run. If None,
+                a default device will be selected. Defaults to None.
+            dtype (torch.dtype): Data type for model calculations. Defaults to
+                torch.float64.
+            **kwargs: Additional model-specific parameters.
 
-        If the model requires atomic information, it should accept atomic_numbers and
-        batch as arguments.
-
-        The model must also set self._compute_stress. Model.compute_stress must be
-        True for some integrators. It can be set to False if the model does not
-        compute stresses, in which case those integrators will fail with a warning.
+        Notes:
+            All implementing classes must set self._device, self._dtype,
+            self._compute_stress and self._compute_force in their __init__ method.
         """
 
     @property
@@ -106,40 +161,54 @@ class ModelInterface(ABC):
             " so compute_force cannot be set after initialization."
         )
 
+    @property
+    def memory_scales_with(self) -> Literal["n_atoms", "n_atoms_x_density"]:
+        """The metric that the model scales with.
+
+        Models with radial neighbor cutoffs scale with "n_atoms_x_density",
+        while models with a fixed number of neighbors scale with "n_atoms".
+        Default is "n_atoms_x_density" because most models are radial cutoff based.
+
+        Returns:
+            The metric that the model scales with
+        """
+        return getattr(self, "_memory_scales_with", "n_atoms_x_density")
+
     @abstractmethod
-    def forward(
-        self,
-        positions: torch.Tensor,
-        cell: torch.Tensor | None,
-        batch: torch.Tensor | None,
-        atomic_numbers: torch.Tensor | None = None,
-        **kwargs,
-    ) -> dict[str, torch.Tensor]:
-        """Abstract method that must be implemented by all models.
+    def forward(self, state: SimState | StateDict, **kwargs) -> dict[str, torch.Tensor]:
+        """Calculate energies, forces, and stresses for a atomistic system.
+
+        This is the main computational method that all model implementations must provide.
+        It takes atomic positions and system information as input and returns a dictionary
+        containing computed physical properties.
 
         Args:
-            positions: The positions of the atoms
-            cell: The cell of the system
-            batch: The batch of the system
-            atomic_numbers: The atomic numbers of the atoms
-            **kwargs: Additional keyword arguments
+            state (SimState | StateDict): Simulation state or state dictionary. The state
+                dictionary is dependent on the model but typically must contain the
+                following keys:
+                - "positions": Atomic positions with shape [n_atoms, 3]
+                - "cell": Unit cell vectors with shape [n_batches, 3, 3]
+                - "batch": Batch indices for each atom with shape [n_atoms]
+                - "atomic_numbers": Atomic numbers with shape [n_atoms] (optional)
+            **kwargs: Additional model-specific parameters.
 
-        All models must accept positions, cell, and batch as inputs.
+        Returns:
+            dict[str, torch.Tensor]: Dictionary containing computed properties:
+                - "energy": Potential energy with shape [n_batches]
+                - "forces": Atomic forces with shape [n_atoms, 3]
+                - "stress": Stress tensor with shape [n_batches, 3, 3] (if
+                    compute_stress=True)
+                - May include additional model-specific outputs
 
-        Positions must have shape (n_atoms, 3), where n_atoms is the total
-        number of atoms summed over all batches. Batch must have shape
-        (n_atoms,) and should be consecutive integers.
+        Examples:
+            ```python
+            # Compute energies and forces with a model
+            output = model.forward(state)
 
-        If the model requires atomic information and that information
-        can be updated on-the-fly, the model should accept atomic_numbers and
-        batch as inputs.
-
-        The output must be a dictionary with at least "energy" and "forces".
-        The "stress" must also be computed if self.compute_stress is True.
-
-        The shape of all per-atom properties must be
-
-        # TODO: specify torch.Tensor types and shapes
+            energy = output["energy"]
+            forces = output["forces"]
+            stress = output.get("stress", None)
+            ```
         """
 
 
@@ -148,7 +217,34 @@ def validate_model_outputs(
     device: torch.device,
     dtype: torch.dtype,
 ) -> None:
-    """Validate the outputs of a model."""
+    """Validate the outputs of a model implementation against the interface requirements.
+
+    Runs a series of tests to ensure a model implementation correctly follows the
+    ModelInterface contract. The tests include creating sample systems, running
+    forward passes, and verifying output shapes and consistency.
+
+    Args:
+        model (ModelInterface): Model implementation to validate.
+        device (torch.device): Device to run the validation tests on.
+        dtype (torch.dtype): Data type to use for validation tensors.
+
+    Raises:
+        AssertionError: If the model doesn't conform to the required interface,
+            including issues with output shapes, types, or behavior consistency.
+
+    Examples:
+        ```python
+        # Create a new model implementation
+        model = MyCustomModel(device=torch.device("cuda"))
+
+        # Validate that it correctly implements the interface
+        validate_model_outputs(model, device=torch.device("cuda"), dtype=torch.float64)
+        ```
+
+    Notes:
+        This validator creates small test systems (silicon and iron) for validation.
+        It tests both single and multi-batch processing capabilities.
+    """
     from ase.build import bulk
 
     from torch_sim.io import atoms_to_state

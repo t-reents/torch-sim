@@ -1,4 +1,4 @@
-"""Integrators for molecular dynamics simulations."""
+"""Integrators for atomistic dynamics simulations."""
 
 from collections.abc import Callable
 from dataclasses import dataclass
