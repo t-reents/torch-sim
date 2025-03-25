@@ -14,3 +14,10 @@ dist/
 
 # model checkpoints
 *.model
+
+# docs
+docs_build/
+docs/reference/torch_sim.*
+
+# ipynb files
+*.ipynb
