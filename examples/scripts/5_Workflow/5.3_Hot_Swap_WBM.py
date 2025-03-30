@@ -23,13 +23,13 @@ from torch_sim.runners import generate_force_convergence_fn
 
 # --- Setup and Configuration ---
 # Device and data type configuration
-device = torch.device("cuda")
+device = torch.device("cpu") if os.getenv("CI") else torch.device("cuda")
 dtype = torch.float32
 print(f"job will run on {device=}")
 
 # --- Model Initialization ---
 print("Loading MACE model...")
-mace_checkpoint_url = "https://github.com/ACEsuit/mace-mp/releases/download/mace_omat_0/mace-omat-0-medium.model"
+mace_checkpoint_url = "https://github.com/ACEsuit/mace-mp/releases/download/mace_mpa_0/mace-mpa-0-medium.model"
 mace = mace_mp(model=mace_checkpoint_url, return_raw_model=True)
 mace_model = MaceModel(
     model=mace,
@@ -60,7 +60,7 @@ fire_states = fire_init(atoms_to_state(ase_atoms_list, device=device, dtype=dtyp
 batcher = HotSwappingAutoBatcher(
     model=mace_model,
     memory_scales_with="n_atoms_x_density",
-    max_memory_scaler=None,
+    max_memory_scaler=1000 if os.getenv("CI") else None,
 )
 converge_max_force = generate_force_convergence_fn(force_tol=0.05)
 
