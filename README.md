@@ -4,7 +4,9 @@
 [![codecov](https://codecov.io/gh/radical-ai/torch-sim/branch/main/graph/badge.svg)](https://codecov.io/gh/radical-ai/torch-sim)
 [![This project supports Python 3.11+](https://img.shields.io/badge/Python-3.11+-blue.svg?logo=python&logoColor=white)](https://python.org/downloads)
 [![PyPI](https://img.shields.io/pypi/v/torch-sim?logo=pypi&logoColor=white)](https://pypi.org/project/torch-sim)
-[![Zenodo](https://img.shields.io/badge/DOI-TODO-blue?logo=Zenodo&logoColor=white)](https://zenodo.org/records/TODO)
+[![Zenodo](https://img.shields.io/badge/DOI-TODO-blue?logo=Zenodo&logoColor=white)][zenodo]
+
+[zenodo]: https://zenodo.org/records/15127004
 
 <!-- help docs find start of prose in readme, DO NOT REMOVE -->
 TorchSim is an next-generation open-source atomistic simulation engine for the MLIP era. By rewriting the core primitives of atomistic simulation in Pytorch, it allows orders of magnitude acceleration of popular machine learning potentials.
@@ -27,7 +29,8 @@ native support for GPUs, MLIP models, ASE integration, simple API,
 autobatching, and trajectory reporting, all in under 40 lines of code.
 
 ### Running batched MD
-```python
+
+```py
 import torch
 import torch_sim as ts
 
@@ -65,11 +68,12 @@ for filename in trajectory_files:
 
 print(final_energies)
 ```
+
 ### Running batched relaxation
 
 To then relax those structures with FIRE is just a few more lines.
 
-```python
+```py
 # relax all of the high temperature states
 relaxed_state = ts.optimize(
     system=final_state,
@@ -82,12 +86,15 @@ print(relaxed_state.energy)
 ```
 
 ## Installation
+
 ### PyPI Installation
+
 ```sh
 pip install torch-sim
 ```
 
 ### Installing from source
+
 ```sh
 git clone https://github.com/radical-ai/torch-sim
 cd torch-sim
@@ -96,20 +103,18 @@ pip install .
 
 ## Examples
 
-`torch-sim` has dozens of example scripts and tutorials in the [`examples/`](examples/readme.md) folder.
+To understand how `torch-sim` works, start with the [comprehensive tutorials](https://radical-ai.github.io/torch-sim/user/overview.html) in the documentation.
 
-(link to API docs)
+Even more usage examples can be found in the [`examples/`](examples/readme.md) folder.
 
 ## Core Modules
 
-(Link to API docs)
+The `torch-sim` structured is summarized in the [API reference](https://radical-ai.github.io/torch-sim/reference/index.html) documentation.
+
+## License
+
+`torch-sim` is released under an [MIT license](LICENSE).
 
 ## Citation
 
-If you use TorchSim in your research, please cite:
-
-```bib
-@repository{gangan-2025-torchsim,
-  ...
-}
-```
+A manuscript is in preparation. Meanwhile, if you use TorchSim in your research, please [cite the Zenodo archive][zenodo].

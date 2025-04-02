@@ -49,8 +49,8 @@ jobs:
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          slug: Radical-AI/torch-sim
-          flags: core,${{ matrix.os }},python-${{ matrix.version.python }}
+          slug: radical-ai/torch-sim
+          flags: core
 
   test-mace:
     strategy:
@@ -87,8 +87,8 @@ jobs:
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          slug: Radical-AI/torch-sim
-          flags: mace,${{ matrix.os }},python-${{ matrix.version.python }}
+          slug: radical-ai/torch-sim
+          flags: mace
 
   test-elastic:
     strategy:
@@ -125,8 +125,8 @@ jobs:
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          slug: Radical-AI/torch-sim
-          flags: elastic,${{ matrix.os }},python-${{ matrix.version.python }}
+          slug: radical-ai/torch-sim
+          flags: elastic
 
   test-fairchem:
     strategy:
@@ -177,8 +177,8 @@ jobs:
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          slug: Radical-AI/torch-sim
-          flags: fairchem,${{ matrix.os }},python-${{ matrix.version.python }}
+          slug: radical-ai/torch-sim
+          flags: fairchem
 
   test-orb:
     strategy:
@@ -217,8 +217,8 @@ jobs:
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          slug: Radical-AI/torch-sim
-          flags: orb,${{ matrix.os }},python-${{ matrix.version.python }}
+          slug: radical-ai/torch-sim
+          flags: orb
 
   test-sevennet:
     strategy:
@@ -257,8 +257,8 @@ jobs:
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          slug: Radical-AI/torch-sim
-          flags: sevennet,${{ matrix.os }},python-${{ matrix.version.python }}
+          slug: radical-ai/torch-sim
+          flags: sevennet
 
   find-examples:
     runs-on: ubuntu-latest
