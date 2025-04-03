@@ -3,18 +3,20 @@
 [![CI](https://github.com/radical-ai/torch-sim/actions/workflows/test.yml/badge.svg)](https://github.com/radical-ai/torch-sim/actions/workflows/test.yml)
 [![codecov](https://codecov.io/gh/radical-ai/torch-sim/branch/main/graph/badge.svg)](https://codecov.io/gh/radical-ai/torch-sim)
 [![This project supports Python 3.11+](https://img.shields.io/badge/Python-3.11+-blue.svg?logo=python&logoColor=white)](https://python.org/downloads)
-[![PyPI](https://img.shields.io/pypi/v/torch-sim?logo=pypi&logoColor=white)](https://pypi.org/project/torch-sim)
+[![PyPI](https://img.shields.io/pypi/v/torch_sim_atomistic?logo=pypi&logoColor=white)](https://pypi.org/project/torch_sim_atomistic)
 [![Zenodo](https://img.shields.io/badge/Zenodo-15127004-blue?logo=Zenodo&logoColor=white)][zenodo]
 
 [zenodo]: https://zenodo.org/records/15127004
 
 <!-- help docs find start of prose in readme, DO NOT REMOVE -->
-TorchSim is an next-generation open-source atomistic simulation engine for the MLIP era. By rewriting the core primitives of atomistic simulation in Pytorch, it allows orders of magnitude acceleration of popular machine learning potentials.
+torch-sim is a next-generation open-source atomistic simulation engine for the MLIP
+era. By rewriting the core primitives of atomistic simulation in Pytorch, it allows
+orders of magnitude acceleration of popular machine learning potentials.
 
 * Automatic batching and GPU memory management allowing significant simulation speedup
-* Support for MACE and Fairchem MLIP models
+* Support for MACE, Fairchem, and SevenNet MLIP models with more in progress
 * Support for classical lennard jones, morse, and soft-sphere potentials
-* Molecular dynamics integration schemes like NVE, NVT Langevin, and NPT langevin
+* Molecular dynamics integration schemes like NVE, NVT Langevin, and NPT Langevin
 * Relaxation of atomic positions and cell with gradient descent and FIRE
 * Swap monte carlo and hybrid swap monte carlo algorithm
 * An extensible binary trajectory writing format with support for arbitrary properties
@@ -24,7 +26,7 @@ TorchSim is an next-generation open-source atomistic simulation engine for the M
 
 ## Quick Start
 
-Here is a quick demonstration of many of the core features of TorchSim:
+Here is a quick demonstration of many of the core features of torch-sim:
 native support for GPUs, MLIP models, ASE integration, simple API,
 autobatching, and trajectory reporting, all in under 40 lines of code.
 
@@ -85,12 +87,25 @@ relaxed_state = ts.optimize(
 print(relaxed_state.energy)
 ```
 
+## Speedup
+
+torch-sim achieves up to 100x speedup compared to ASE with popular MLIPs.
+
+![Speedup comparison](https://github.com/user-attachments/assets/2ad1d8b0-a7aa-467b-9260-acb76a1ed591)
+
+This figure compares the time per atom of ASE and torch_sim. Time per atom is defined
+as the number of atoms / total time. While ASE can only run a single system of n_atoms
+(on the x axis), torch_sim can run as many systems as will fit in memory. On an H100,
+the max atoms that could fit in memory was 8000 for gemnet, 10000 for MACE, and 2500
+for SevenNet. This metric describes model performance by capturing speed and memory
+usage simultaneously.
+
 ## Installation
 
 ### PyPI Installation
 
 ```sh
-pip install torch-sim
+pip install torch-sim-atomistic
 ```
 
 ### Installing from source
@@ -103,13 +118,13 @@ pip install .
 
 ## Examples
 
-To understand how `torch-sim` works, start with the [comprehensive tutorials](https://radical-ai.github.io/torch-sim/user/overview.html) in the documentation.
+To understand how torch-sim works, start with the [comprehensive tutorials](https://radical-ai.github.io/torch-sim/user/overview.html) in the documentation.
 
 Even more usage examples can be found in the [`examples/`](examples/readme.md) folder.
 
 ## Core Modules
 
-The `torch-sim` structured is summarized in the [API reference](https://radical-ai.github.io/torch-sim/reference/index.html) documentation.
+torch-sim's structure is summarized in the [API reference](https://radical-ai.github.io/torch-sim/reference/index.html) documentation.
 
 ## License
 
@@ -117,4 +132,4 @@ The `torch-sim` structured is summarized in the [API reference](https://radical-
 
 ## Citation
 
-A manuscript is in preparation. Meanwhile, if you use TorchSim in your research, please [cite the Zenodo archive][zenodo].
+A manuscript is in preparation. Meanwhile, if you use torch-sim in your research, please [cite the Zenodo archive][zenodo].

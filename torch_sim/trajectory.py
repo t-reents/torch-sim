@@ -65,12 +65,12 @@ class TrajectoryReporter:
 
     Attributes:
         state_frequency (int): How often to save full states (in simulation steps)
-        prop_calculators (dict): Dictionary mapping frequencies to property calculators
+        prop_calculators (dict): Map of frequencies to property calculators
         state_kwargs (dict): Additional arguments for state writing
         metadata (dict): Metadata to save in trajectory files
         trajectories (list): TorchSimTrajectory instances
         filenames (list): Trajectory file paths
-        array_registry (dict): Dictionary of array names to (shape, dtype) tuples
+        array_registry (dict): Map of array names to (shape, dtype) tuples
         shape_warned (bool): Whether a shape warning has been issued
 
     Examples:
@@ -121,9 +121,8 @@ class TrajectoryReporter:
         """
         self.state_frequency = state_frequency
         self.trajectory_kwargs = trajectory_kwargs or {}
-        self.trajectory_kwargs["mode"] = self.trajectory_kwargs.get(
-            "mode", "w"
-        )  # default will be to force overwrite if none is set
+        # default is to force overwrite
+        self.trajectory_kwargs["mode"] = self.trajectory_kwargs.get("mode", "w")
 
         self.prop_calculators = prop_calculators or {}
         self.state_kwargs = state_kwargs or {}
@@ -131,11 +130,11 @@ class TrajectoryReporter:
         self.metadata = metadata
 
         self.trajectories = []
-        if filenames is not None:
-            self.load_new_trajectories(filenames)
-        else:
+        if filenames is None:
             self.filenames = None
             self.trajectories = []
+        else:
+            self.load_new_trajectories(filenames)
 
         self._add_model_arg_to_prop_calculators()
 
@@ -245,7 +244,7 @@ class TrajectoryReporter:
         split_states = state.split()
         all_props: list[dict[str, torch.Tensor]] = []
         # Process each batch separately
-        for i, substate in enumerate(split_states):
+        for idx, substate in enumerate(split_states):
             # Slice the state once to get only the data for this batch
             self.shape_warned = True
 
@@ -255,7 +254,7 @@ class TrajectoryReporter:
                 and step % self.state_frequency == 0
                 and self.filenames is not None
             ):
-                self.trajectories[i].write_state(substate, step, **self.state_kwargs)
+                self.trajectories[idx].write_state(substate, step, **self.state_kwargs)
 
             all_state_props = {}
             # Process property calculators for this batch
@@ -275,7 +274,7 @@ class TrajectoryReporter:
                 if props:
                     all_state_props.update(props)
                     if self.filenames is not None:
-                        self.trajectories[i].write_arrays(props, step)
+                        self.trajectories[idx].write_arrays(props, step)
             all_props.append(all_state_props)
 
         return all_props
@@ -353,7 +352,7 @@ class TorchSimTrajectory:
 
         Args:
             filename (str | pathlib.Path): Path to the HDF5 file
-            mode (Literal["w", "a", "r"]): Mode to open the file in. "w" will create
+            mode ("w" | "a" | "r"): Mode to open the file in. "w" will create
                 a new file and overwrite any existing file, "a" will append to the
                 existing file and "r" will open the file for reading only. Defaults to
                 "r".
@@ -514,7 +513,7 @@ class TorchSimTrajectory:
             ValueError: If the array dtype is not supported
         """
         if array.dtype not in self.type_map:
-            raise ValueError(f"Unsupported dtype: {array.dtype}")
+            raise ValueError(f"Unsupported {array.dtype=}")
 
         self._file.create_earray(
             where="/data/",
@@ -524,10 +523,7 @@ class TorchSimTrajectory:
         )
 
         self._file.create_earray(
-            where="/steps/",
-            name=name,
-            atom=tables.Int32Atom(),
-            shape=(0,),
+            where="/steps/", name=name, atom=tables.Int32Atom(), shape=(0,)
         )
 
         # in the registry we store the shape of the single-frame array
@@ -630,9 +626,7 @@ class TorchSimTrajectory:
             raise ValueError(f"Array {name} not found in registry")
 
         return self._file.root.data.__getitem__(name).read(
-            start=start,
-            stop=stop,
-            step=step,
+            start=start, stop=stop, step=step
         )
 
     def get_steps(
@@ -656,9 +650,7 @@ class TorchSimTrajectory:
             np.ndarray: Array of step numbers with shape [n_selected_frames]
         """
         return self._file.root.steps.__getitem__(name).read(
-            start=start,
-            stop=stop,
-            step=step,
+            start=start, stop=stop, step=step
         )
 
     def __str__(self) -> str:
@@ -674,9 +666,7 @@ class TorchSimTrajectory:
             steps = shape_ints[0]
             shape = shape_ints[1:]
             dtype = node.dtype
-            summary.append(
-                f"  {node.name}: {steps} steps with shape {shape} and dtype {dtype}"
-            )
+            summary.append(f"  {node.name}: {steps=} with {shape=} and {dtype=}")
         return "\n".join(summary)
 
     def write_state(  # noqa: C901
@@ -735,10 +725,7 @@ class TorchSimTrajectory:
             )
 
         if len(sub_states) != len(steps):
-            raise ValueError(
-                f"Number of states {len(sub_states)} must match the number of steps "
-                f"{len(steps)}"
-            )
+            raise ValueError(f"{len(sub_states)=} must match the {len(steps)=}")
         # Initialize data dictionary with required arrays
         data = {
             "positions": torch.stack([s.positions for s in state]),
@@ -774,9 +761,8 @@ class TorchSimTrajectory:
 
         if variable_atomic_numbers:
             data["atomic_numbers"] = torch.stack([s.atomic_numbers for s in state])
-        elif (
-            "atomic_numbers" not in self.array_registry
-        ):  # Save atomic numbers only for first frame
+        elif "atomic_numbers" not in self.array_registry:
+            # Save atomic numbers only for first frame
             self.write_arrays({"atomic_numbers": state[0].atomic_numbers}, 0)
 
         if "pbc" not in self.array_registry:
@@ -805,7 +791,10 @@ class TorchSimTrajectory:
 
         # Get required data
         if "positions" not in self.array_registry:
-            raise ValueError("Positions not found in trajectory so cannot get structure.")
+            keys = list(self.array_registry)
+            raise ValueError(
+                f"Positions not found in trajectory so cannot get structure. Have {keys=}"
+            )
 
         # check length of positions array
         n_frames = self._file.root.data.positions.shape[0]
@@ -839,8 +828,7 @@ class TorchSimTrajectory:
         for analysis and visualization.
 
         Args:
-            frame (int, optional): Frame index to retrieve (-1 for last frame). Defaults
-            to -1.
+            frame (int, optional): Frame index to retrieve. Defaults to -1 for last frame.
 
         Returns:
             Structure: Pymatgen Structure object for the specified frame
@@ -865,7 +853,7 @@ class TorchSimTrajectory:
             validate_proximity=False,
         )
 
-    def get_atoms(self, frame: int) -> Any:
+    def get_atoms(self, frame: int = -1) -> Any:
         """Get an ASE Atoms object for a given frame.
 
         Converts the state at the specified frame to an ASE Atoms object
@@ -895,7 +883,7 @@ class TorchSimTrajectory:
 
     def get_state(
         self,
-        frame: int,
+        frame: int = -1,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
     ) -> SimState:
@@ -943,8 +931,7 @@ class TorchSimTrajectory:
 
         Ensures all data is written to disk and releases the file handle.
         """
-        # TODO: ???
-        if self._file.isopen:
+        if self._file.isopen:  # TODO: ???
             self._file.close()
 
     def __enter__(self) -> "TorchSimTrajectory":
@@ -998,11 +985,10 @@ class TorchSimTrajectory:
         """
         try:
             from ase.io.trajectory import Trajectory
-        except ImportError as err:
+        except ImportError:
             raise ImportError(
-                "ASE is required to convert to ASE trajectory. "
-                "Please install it with 'pip install ase'"
-            ) from err
+                "ASE is required to convert to ASE trajectory. Run `pip install ase`"
+            ) from None
 
         # Create ASE trajectory
         traj = Trajectory(filename, mode="w")
@@ -1013,6 +999,4 @@ class TorchSimTrajectory:
             traj.write(atoms)
 
         traj.close()
-
-        # Reopen in read mode
-        return Trajectory(filename)
+        return Trajectory(filename)  # Reopen in read mode

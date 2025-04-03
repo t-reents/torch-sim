@@ -1,5 +1,5 @@
 [project]
-name = "torch_sim"
+name = "torch_sim_atomistic"
 version = "0.1.0"
 description = "A pytorch toolkit for calculating material properties using MLIPs"
 authors = [
@@ -87,6 +87,7 @@ ignore = [
     "ERA001",  # Found commented-out code
     "FIX002",  # Line contains TODO, consider resolving the issue
     "G003",    # logging-string-concat
+    "G004",    # logging uses f-string
     "INP001",  # implicit-namespace-package
     "ISC001",  # avoid conflicts with the formatter
     "N803",    # Variable name should be lowercase
@@ -118,7 +119,6 @@ pep8-naming.ignore-names = ["get_kT", "kT"]
 "examples/**/*" = ["B018"]
 "examples/tutorials/**/*" = ["ALL"]
 
-
 [tool.ruff.format]
 docstring-code-format = true
 
@@ -128,3 +128,8 @@ check-filenames = true
 [tool.pytest]
 addopts = ["--cov-report=term-missing", "--cov=torch_sim", "-v"]
 testpaths = ["tests"]
+
+[tool.coverage.run]
+omit = [
+    "torch_sim/unbatched/*",
+]
