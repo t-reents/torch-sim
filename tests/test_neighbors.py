@@ -6,6 +6,7 @@ from ase.build import bulk, molecule
 from ase.neighborlist import neighbor_list
 
 from torch_sim.neighbors import (
+    primitive_neighbor_list,
     standard_nl,
     torch_nl_linked_cell,
     torch_nl_n2,
@@ -13,6 +14,11 @@ from torch_sim.neighbors import (
     vesin_nl_ts,
 )
 from torch_sim.transforms import compute_cell_shifts, compute_distances_with_cell_shifts
+
+
+@pytest.fixture
+def dtype() -> torch.dtype:
+    return torch.float64
 
 
 def ase_to_torch_batch(
@@ -59,9 +65,6 @@ def ase_to_torch_batch(
         n_atoms.to(device=device),
     )
 
-
-DEVICE = torch.device("cpu")
-DTYPE = torch.float64
 
 # Adapted from torch_nl test
 # https://github.com/felixmusil/torch_nl/blob/main/torch_nl/test_nl.py
@@ -131,7 +134,7 @@ def structure_set() -> list:
 
 
 @pytest.mark.parametrize("cutoff", [1, 3, 5, 7])
-def test_standard_nl(*, cutoff: float) -> None:
+def test_standard_nl(*, cutoff: float, device: torch.device, dtype: torch.dtype) -> None:
     """Check that standard_nl gives the same NL as ASE by comparing
     the resulting sorted list of distances between neighbors.
     """
@@ -139,8 +142,8 @@ def test_standard_nl(*, cutoff: float) -> None:
 
     for structure in structures:
         # Convert to torch tensors
-        pos = torch.tensor(structure.positions, device=DEVICE, dtype=DTYPE)
-        cell = torch.tensor(structure.cell.array, device=DEVICE, dtype=DTYPE)
+        pos = torch.tensor(structure.positions, device=device, dtype=dtype)
+        cell = torch.tensor(structure.cell.array, device=device, dtype=dtype)
 
         pbc = structure.pbc.any() if structure.pbc.any() else False
 
@@ -150,7 +153,7 @@ def test_standard_nl(*, cutoff: float) -> None:
             positions=pos,
             cell=cell,
             pbc=pbc,
-            cutoff=torch.tensor(cutoff, dtype=DTYPE, device=DEVICE),
+            cutoff=torch.tensor(cutoff, dtype=dtype, device=device),
         )
 
         # Calculate distances with cell shifts
@@ -196,7 +199,116 @@ def test_standard_nl(*, cutoff: float) -> None:
 
 
 @pytest.mark.parametrize("cutoff", [1, 3, 5, 7])
-def test_vesin_nl_ts(*, cutoff: float) -> None:
+@pytest.mark.parametrize("use_jit", [True, False])
+def test_primitive_neighbor_list(
+    *, cutoff: float, device: torch.device, dtype: torch.dtype, use_jit: bool
+) -> None:
+    """Check that primitive_neighbor_list gives the same NL as ASE by comparing
+    the resulting sorted list of distances between neighbors.
+
+    Args:
+        cutoff: Cutoff distance for neighbor search
+        device: Torch device to use
+        dtype: Torch dtype to use
+        use_jit: Whether to use the jitted version or disable JIT
+    """
+    structures = structure_set()
+
+    # Create a non-jitted version of the function if requested
+    if use_jit:
+        neighbor_list_fn = primitive_neighbor_list
+    else:
+        # Create wrapper that disables JIT
+        import os
+
+        old_jit_setting = os.environ.get("PYTORCH_JIT")
+        os.environ["PYTORCH_JIT"] = "0"
+
+        # Import the function again to get the non-jitted version
+        from importlib import reload
+
+        import torch_sim.neighbors
+
+        reload(torch_sim.neighbors)
+        neighbor_list_fn = torch_sim.neighbors.primitive_neighbor_list
+
+        # Restore JIT setting after test
+        if old_jit_setting is not None:
+            os.environ["PYTORCH_JIT"] = old_jit_setting
+        else:
+            os.environ.pop("PYTORCH_JIT", None)
+
+    for structure in structures:
+        # Convert to torch tensors
+        pos = torch.tensor(structure.positions, device=device, dtype=dtype)
+        cell = torch.tensor(structure.cell.array, device=device, dtype=dtype)
+
+        pbc = structure.pbc.any()
+
+        # Get the neighbor list using the appropriate function (jitted or non-jitted)
+        # Note: No self-interaction
+        idx_i, idx_j, shifts_tensor = neighbor_list_fn(
+            quantities="ijS",
+            positions=pos,
+            cell=cell,
+            pbc=(pbc, pbc, pbc),
+            cutoff=torch.tensor(cutoff, dtype=dtype, device=device),
+            device=device,
+            dtype=dtype,
+            self_interaction=False,
+            use_scaled_positions=False,
+            max_n_bins=int(1e6),
+        )
+
+        # Create mapping
+        mapping = torch.stack((idx_i, idx_j), dim=0)
+
+        # Convert shifts_tensor to the same dtype as cell before matrix multiplication
+        shifts_tensor = shifts_tensor.to(dtype=dtype)
+
+        # Calculate distances with cell shifts
+        cell_shifts_prim = torch.mm(shifts_tensor, cell)
+        dds_prim = compute_distances_with_cell_shifts(pos, mapping, cell_shifts_prim)
+        dds_prim = np.sort(dds_prim.numpy())
+
+        # Get the neighbor list from ase
+        idx_i_ref, idx_j_ref, shifts_ref, dist_ref = neighbor_list(
+            quantities="ijSd",
+            a=structure,
+            cutoff=cutoff,
+            self_interaction=False,
+            max_nbins=1e6,
+        )
+
+        # Convert to torch tensors
+        idx_i_ref = torch.tensor(idx_i_ref, dtype=torch.long, device=torch.device("cpu"))
+        idx_j_ref = torch.tensor(idx_j_ref, dtype=torch.long, device=torch.device("cpu"))
+
+        # Create mapping and shifts
+        mapping_ref = torch.stack((idx_i_ref, idx_j_ref), dim=0)
+        shifts_ref = torch.tensor(
+            shifts_ref, dtype=torch.float64, device=torch.device("cpu")
+        )
+
+        # Calculate distances with cell shifts
+        cell_shifts_ref = torch.mm(shifts_ref, cell)
+        dds_ref = compute_distances_with_cell_shifts(pos, mapping_ref, cell_shifts_ref)
+
+        # Sort the distances
+        dds_ref = np.sort(dds_ref.numpy())
+        dist_ref = np.sort(dist_ref)
+
+        # Check that the distances are the same with ase and torchsim logic
+        np.testing.assert_allclose(dds_ref, dist_ref)
+
+        # Check that the primitive_neighbor_list distances match ASE's
+        np.testing.assert_allclose(
+            dds_prim, dist_ref, err_msg=f"Failed with use_jit={use_jit}"
+        )
+
+
+@pytest.mark.parametrize("cutoff", [1, 3, 5, 7])
+def test_vesin_nl_ts(*, cutoff: float, device: torch.device, dtype: torch.dtype) -> None:
     """Check that vesin_nl gives the same NL as ASE by comparing
     the resulting sorted list of distances between neighbors.
     """
@@ -204,8 +316,8 @@ def test_vesin_nl_ts(*, cutoff: float) -> None:
 
     for structure in structures:
         # Convert to torch tensors
-        pos = torch.tensor(structure.positions, device=DEVICE, dtype=DTYPE)
-        cell = torch.tensor(structure.cell.array, device=DEVICE, dtype=DTYPE)
+        pos = torch.tensor(structure.positions, device=device, dtype=dtype)
+        cell = torch.tensor(structure.cell.array, device=device, dtype=dtype)
 
         pbc = structure.pbc.any()
 
@@ -215,7 +327,7 @@ def test_vesin_nl_ts(*, cutoff: float) -> None:
             positions=pos,
             cell=cell,
             pbc=pbc,
-            cutoff=torch.tensor(cutoff, dtype=DTYPE, device=DEVICE),
+            cutoff=torch.tensor(cutoff, dtype=dtype, device=device),
         )
 
         # Calculate distances with cell shifts
@@ -261,7 +373,7 @@ def test_vesin_nl_ts(*, cutoff: float) -> None:
 
 
 @pytest.mark.parametrize("cutoff", [1, 3, 5, 7])
-def test_vesin_nl(*, cutoff: float) -> None:
+def test_vesin_nl(*, cutoff: float, device: torch.device, dtype: torch.dtype) -> None:
     """Check that vesin_nl gives the same NL as ASE by comparing
     the resulting sorted list of distances between neighbors.
     """
@@ -269,8 +381,8 @@ def test_vesin_nl(*, cutoff: float) -> None:
 
     for structure in structures:
         # Convert to torch tensors
-        pos = torch.tensor(structure.positions, device=DEVICE, dtype=DTYPE)
-        cell = torch.tensor(structure.cell.array, device=DEVICE, dtype=DTYPE)
+        pos = torch.tensor(structure.positions, device=device, dtype=dtype)
+        cell = torch.tensor(structure.cell.array, device=device, dtype=dtype)
 
         pbc = structure.pbc.any()
 
@@ -280,7 +392,7 @@ def test_vesin_nl(*, cutoff: float) -> None:
             positions=pos,
             cell=cell,
             pbc=pbc,
-            cutoff=torch.tensor(cutoff, device=DEVICE, dtype=DTYPE),
+            cutoff=torch.tensor(cutoff, device=device, dtype=dtype),
         )
 
         # Calculate distances with cell shifts
@@ -327,14 +439,16 @@ def test_vesin_nl(*, cutoff: float) -> None:
 
 @pytest.mark.parametrize("cutoff", [1, 3, 5, 7])
 @pytest.mark.parametrize("self_interaction", [True, False])
-def test_torch_nl_n2(*, cutoff: float, self_interaction: bool) -> None:
+def test_torch_nl_n2(
+    *, cutoff: float, self_interaction: bool, device: torch.device, dtype: torch.dtype
+) -> None:
     """Check that torch_neighbor_list gives the same NL as ASE by comparing
     the resulting sorted list of distances between neighbors.
     """
     structures = structure_set()
 
     # Convert to torch batch (concatenate all tensors)
-    pos, cell, pbc, batch, _ = ase_to_torch_batch(structures, device=DEVICE, dtype=DTYPE)
+    pos, cell, pbc, batch, _ = ase_to_torch_batch(structures, device=device, dtype=dtype)
 
     # Get the neighbor list from torch_nl_n2
     mapping, mapping_batch, shifts_idx = torch_nl_n2(
@@ -365,12 +479,14 @@ def test_torch_nl_n2(*, cutoff: float, self_interaction: bool) -> None:
 
 @pytest.mark.parametrize("cutoff", [1, 3, 5, 7])
 @pytest.mark.parametrize("self_interaction", [True, False])
-def test_torch_nl_linked_cell(*, cutoff: float, self_interaction: bool) -> None:
+def test_torch_nl_linked_cell(
+    *, cutoff: float, self_interaction: bool, device: torch.device, dtype: torch.dtype
+) -> None:
     """Check that torch_neighbor_list gives the same NL as ASE by comparing
     the resulting sorted list of distances between neighbors.
     """
     structures = structure_set()
-    pos, cell, pbc, batch, _ = ase_to_torch_batch(structures, device=DEVICE, dtype=DTYPE)
+    pos, cell, pbc, batch, _ = ase_to_torch_batch(structures, device=device, dtype=dtype)
 
     # Get the neighbor list from torch_nl_linked_cell
     mapping, mapping_batch, shifts_idx = torch_nl_linked_cell(
