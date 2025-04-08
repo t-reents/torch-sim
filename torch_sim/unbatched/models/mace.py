@@ -3,6 +3,7 @@
 This module provides a PyTorch implementation of the MACE model calculator.
 """
 
+import typing
 from collections.abc import Callable
 
 import torch
@@ -10,7 +11,27 @@ from mace.cli.convert_e3nn_cueq import run as run_e3nn_to_cueq
 from mace.tools import atomic_numbers_to_indices, to_one_hot, utils
 
 from torch_sim.models.interface import ModelInterface
+from torch_sim.neighbors import vesin_nl_ts
 from torch_sim.state import SimState, StateDict
+
+
+try:
+    from mace.cli.convert_e3nn_cueq import run as run_e3nn_to_cueq
+    from mace.tools import atomic_numbers_to_indices, utils
+
+    from torch_sim.models.mace import to_one_hot
+except ImportError:
+
+    class UnbatchedMaceModel(torch.nn.Module, ModelInterface):
+        """Unbatched MACE model wrapper for torch_sim.
+
+        This class is a placeholder for the UnbatchedMaceModel class.
+        It raises an ImportError if MACE is not installed.
+        """
+
+        def __init__(self, *_args: typing.Any, **_kwargs: typing.Any) -> None:
+            """Dummy init for type checking."""
+            raise ImportError("MACE must be installed to use this model.")
 
 
 class UnbatchedMaceModel(torch.nn.Module, ModelInterface):
@@ -29,12 +50,12 @@ class UnbatchedMaceModel(torch.nn.Module, ModelInterface):
     def __init__(
         self,
         model: torch.nn.Module,
-        neighbor_list_fn: Callable,
         *,
+        neighbor_list_fn: Callable = vesin_nl_ts,
         device: torch.device | None = None,
+        dtype: torch.dtype = torch.float32,
         compute_forces: bool = False,
         compute_stress: bool = False,
-        dtype: torch.dtype = torch.float32,
         enable_cueq: bool = False,
         atomic_numbers: list[int] | torch.Tensor | None = None,
     ) -> None:
@@ -56,33 +77,28 @@ class UnbatchedMaceModel(torch.nn.Module, ModelInterface):
                 Defaults to False.
         """
         super().__init__()
-        self._device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self._device = device or torch.device(
+            "cuda" if torch.cuda.is_available() else "cpu"
+        )
         self._dtype = dtype
         self._compute_forces = compute_forces
         self._compute_stress = compute_stress
         self.neighbor_list_fn = neighbor_list_fn
 
-        torch.set_default_dtype(self._dtype)
-
-        print(f"Running MACEForce on device: {self._device} with dtype: {self._dtype} ")
+        self.model = model.to(device=self.device, dtype=self.dtype)
+        self.model.eval()
 
         if enable_cueq:
             print("Converting models to CuEq for acceleration")
-            self.model = run_e3nn_to_cueq(model, device=device).to(device)
-        else:
-            self.model = model
-
-        self.model = self.model.to(dtype=self._dtype, device=self._device)
-        self.model.eval()
+            self.model = run_e3nn_to_cueq(self.model)
 
         # set model properties
         self.r_max = self.model.r_max
-
         self.z_table = utils.AtomicNumberTable(
             [int(z) for z in self.model.atomic_numbers]
         )
         self.model.atomic_numbers = torch.tensor(
-            self.model.atomic_numbers.clone(), device=self.device
+            self.model.atomic_numbers.detach().clone(), device=self.device
         )
 
         if atomic_numbers is not None:
@@ -94,9 +110,6 @@ class UnbatchedMaceModel(torch.nn.Module, ModelInterface):
         else:
             self.atomic_numbers_in_init = False
             self.atomic_number_tensor = None
-        # TODO: reimplement this to avoid warning
-        # self.model.atomic_numbers = self.model.atomic_numbers.clone().
-        # detach().to(device=self.device)
 
         # compile model
         # TODO: fix jit compile error
@@ -110,6 +123,7 @@ class UnbatchedMaceModel(torch.nn.Module, ModelInterface):
         atomic_numbers: list[int] | torch.Tensor,
         z_table: utils.AtomicNumberTable,
         device: torch.device,
+        dtype: torch.dtype,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Compute the atomic numbers for the system.
 
@@ -117,6 +131,7 @@ class UnbatchedMaceModel(torch.nn.Module, ModelInterface):
             atomic_numbers (list[int] | torch.Tensor): The atomic numbers of the system.
             z_table (utils.AtomicNumberTable): The atomic number table.
             device (torch.device): The device to run the computation on.
+            dtype (torch.dtype): The data type for tensor operations.
         """
         if isinstance(atomic_numbers, torch.Tensor):
             atomic_numbers = atomic_numbers.tolist()
@@ -132,10 +147,11 @@ class UnbatchedMaceModel(torch.nn.Module, ModelInterface):
                 device=device,
             ).unsqueeze(-1),
             num_classes=len(z_table),
+            dtype=dtype,
         )
         return ptr, batch, node_attrs
 
-    def forward(
+    def forward(  # noqa: C901
         self,
         state: SimState | StateDict,
     ) -> dict[str, torch.Tensor]:
@@ -153,6 +169,9 @@ class UnbatchedMaceModel(torch.nn.Module, ModelInterface):
         """
         if isinstance(state, dict):
             state = SimState(**state, masses=torch.ones_like(state["positions"]))
+
+        if state.batch is not None and state.batch.max() > 0:
+            raise ValueError("UnbatchedMaceModel does not support batched systems.")
 
         if state.atomic_numbers is None and not self.atomic_numbers_in_init:
             raise ValueError(
@@ -172,26 +191,27 @@ class UnbatchedMaceModel(torch.nn.Module, ModelInterface):
                 new_atomic_number_tensor, self.atomic_number_tensor
             ):
                 self.ptr, self.batch, self.node_attrs = self.compute_atomic_numbers(
-                    new_atomic_number_tensor, self.z_table, self.device
+                    new_atomic_number_tensor, self.z_table, self.device, self.dtype
                 )
                 self.atomic_number_tensor = new_atomic_number_tensor
 
-        cell = state.cell
+        row_vector_cell = (
+            state.row_vector_cell
+        )  # MACE uses row vector cell convention for nbr list
         positions = state.positions
         pbc = state.pbc
 
-        if cell.dim() == 3:  # Check if there is an extra batch dimension
-            cell = cell.squeeze(0)  # Squeeze the first dimension
+        if row_vector_cell.dim() == 3:  # Check if there is an extra batch dimension
+            row_vector_cell = row_vector_cell.squeeze(0)  # Squeeze the first dimension
 
         # calculate neighbor list
-        mapping, shifts_idx = self.neighbor_list_fn(
+        edge_index, shifts_idx = self.neighbor_list_fn(
             positions=positions,
-            cell=cell,
+            cell=row_vector_cell,
             pbc=pbc,
             cutoff=self.r_max,
         )
-        edge_index = torch.stack((mapping[0], mapping[1]))
-        shifts = torch.mm(shifts_idx, cell)
+        shifts = torch.mm(shifts_idx, row_vector_cell)
 
         # get model output
         out = self.model(
@@ -200,7 +220,7 @@ class UnbatchedMaceModel(torch.nn.Module, ModelInterface):
                 node_attrs=self.node_attrs,
                 batch=self.batch,
                 pbc=pbc,
-                cell=cell,
+                cell=row_vector_cell,
                 positions=positions,
                 edge_index=edge_index,
                 unit_shifts=shifts_idx,
@@ -209,13 +229,6 @@ class UnbatchedMaceModel(torch.nn.Module, ModelInterface):
             compute_force=self._compute_forces,
             compute_stress=self._compute_stress,
         )
-
-        # num_atoms_arange = torch.arange(len(positions), device=self.device)
-        # node_e0 = self.model.atomic_energies_fn(self.node_attrs)[num_atoms_arange]
-        # energy = out["interaction_energy"] + node_e0.sum()
-
-        # Don't use interaction energy
-        # energy = out["interaction_energy"]
 
         energy = out["energy"]
 

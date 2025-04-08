@@ -1,10 +1,12 @@
 import typing
 from dataclasses import asdict
 
+import pytest
 import torch
 
 from torch_sim.integrators import MDState
 from torch_sim.state import (
+    DeformGradMixin,
     SimState,
     _normalize_batch_indices,
     _pop_states,
@@ -122,38 +124,40 @@ def test_concatenate_two_si_states(
 
 
 def test_concatenate_si_and_fe_states(
-    si_sim_state: SimState, fe_fcc_sim_state: SimState
+    si_sim_state: SimState, fe_supercell_sim_state: SimState
 ) -> None:
     """Test concatenating silicon and argon states."""
     # Concatenate silicon and argon states
-    concatenated = concatenate_states([si_sim_state, fe_fcc_sim_state])
+    concatenated = concatenate_states([si_sim_state, fe_supercell_sim_state])
 
     # Check basic properties
     assert isinstance(concatenated, SimState)
     assert (
         concatenated.positions.shape[0]
-        == si_sim_state.positions.shape[0] + fe_fcc_sim_state.positions.shape[0]
+        == si_sim_state.positions.shape[0] + fe_supercell_sim_state.positions.shape[0]
     )
     assert (
         concatenated.masses.shape[0]
-        == si_sim_state.masses.shape[0] + fe_fcc_sim_state.masses.shape[0]
+        == si_sim_state.masses.shape[0] + fe_supercell_sim_state.masses.shape[0]
     )
     assert concatenated.cell.shape[0] == 2  # One cell per batch
 
     # Check batch indices
     si_atoms = si_sim_state.n_atoms
-    fe_atoms = fe_fcc_sim_state.n_atoms
+    fe_atoms = fe_supercell_sim_state.n_atoms
     expected_batch = torch.cat(
         [
             torch.zeros(si_atoms, dtype=torch.int64, device=si_sim_state.device),
-            torch.ones(fe_atoms, dtype=torch.int64, device=fe_fcc_sim_state.device),
+            torch.ones(fe_atoms, dtype=torch.int64, device=fe_supercell_sim_state.device),
         ]
     )
     assert torch.all(concatenated.batch == expected_batch)
 
     # Check that positions match for each original state
     assert torch.allclose(concatenated.positions[:si_atoms], si_sim_state.positions)
-    assert torch.allclose(concatenated.positions[si_atoms:], fe_fcc_sim_state.positions)
+    assert torch.allclose(
+        concatenated.positions[si_atoms:], fe_supercell_sim_state.positions
+    )
 
     # Check that atomic numbers are correct
     assert torch.all(concatenated.atomic_numbers[:si_atoms] == 14)  # Si
@@ -161,30 +165,33 @@ def test_concatenate_si_and_fe_states(
 
 
 def test_concatenate_double_si_and_fe_states(
-    si_double_sim_state: SimState, fe_fcc_sim_state: SimState
+    si_double_sim_state: SimState, fe_supercell_sim_state: SimState
 ) -> None:
     """Test concatenating a double silicon state and an argon state."""
     # Concatenate double silicon and argon states
-    concatenated = concatenate_states([si_double_sim_state, fe_fcc_sim_state])
+    concatenated = concatenate_states([si_double_sim_state, fe_supercell_sim_state])
 
     # Check basic properties
     assert isinstance(concatenated, SimState)
     assert (
         concatenated.positions.shape[0]
-        == si_double_sim_state.positions.shape[0] + fe_fcc_sim_state.positions.shape[0]
+        == si_double_sim_state.positions.shape[0]
+        + fe_supercell_sim_state.positions.shape[0]
     )
     assert (
         concatenated.cell.shape[0] == 3
     )  # One cell for each original batch (2 Si + 1 Ar)
 
     # Check batch indices
-    fe_atoms = fe_fcc_sim_state.n_atoms
+    fe_atoms = fe_supercell_sim_state.n_atoms
 
     # The double Si state already has batches 0 and 1, so Ar should be batch 2
     expected_batch = torch.cat(
         [
             si_double_sim_state.batch,
-            torch.full((fe_atoms,), 2, dtype=torch.int64, device=fe_fcc_sim_state.device),
+            torch.full(
+                (fe_atoms,), 2, dtype=torch.int64, device=fe_supercell_sim_state.device
+            ),
         ]
     )
     assert torch.all(concatenated.batch == expected_batch)
@@ -198,7 +205,7 @@ def test_concatenate_double_si_and_fe_states(
     # Check that the slices match the original states
     assert torch.allclose(si_slice_0.positions, si_double_sim_state[0].positions)
     assert torch.allclose(si_slice_1.positions, si_double_sim_state[1].positions)
-    assert torch.allclose(fe_slice.positions, fe_fcc_sim_state.positions)
+    assert torch.allclose(fe_slice.positions, fe_supercell_sim_state.positions)
 
 
 def test_split_state(si_double_sim_state: SimState) -> None:
@@ -215,10 +222,12 @@ def test_split_state(si_double_sim_state: SimState) -> None:
 
 
 def test_split_many_states(
-    si_sim_state: SimState, ar_sim_state: SimState, fe_fcc_sim_state: SimState
+    si_sim_state: SimState,
+    ar_supercell_sim_state: SimState,
+    fe_supercell_sim_state: SimState,
 ) -> None:
     """Test splitting a state into a list of states."""
-    states = [si_sim_state, ar_sim_state, fe_fcc_sim_state]
+    states = [si_sim_state, ar_supercell_sim_state, fe_supercell_sim_state]
     concatenated = concatenate_states(states)
     split_states = concatenated.split()
     for state, sub_state in zip(states, split_states, strict=True):
@@ -233,10 +242,12 @@ def test_split_many_states(
 
 
 def test_pop_states(
-    si_sim_state: SimState, ar_sim_state: SimState, fe_fcc_sim_state: SimState
+    si_sim_state: SimState,
+    ar_supercell_sim_state: SimState,
+    fe_supercell_sim_state: SimState,
 ) -> None:
     """Test popping states from a state."""
-    states = [si_sim_state, ar_sim_state, fe_fcc_sim_state]
+    states = [si_sim_state, ar_supercell_sim_state, fe_supercell_sim_state]
     concatenated_states = concatenate_states(states)
     kept_state, popped_states = _pop_states(
         concatenated_states, torch.tensor([0], device=concatenated_states.device)
@@ -248,7 +259,7 @@ def test_pop_states(
     assert isinstance(popped_states[0], SimState)
     assert popped_states[0].positions.shape == si_sim_state.positions.shape
 
-    len_kept = ar_sim_state.n_atoms + fe_fcc_sim_state.n_atoms
+    len_kept = ar_supercell_sim_state.n_atoms + fe_supercell_sim_state.n_atoms
     assert kept_state.positions.shape == (len_kept, 3)
     assert kept_state.masses.shape == (len_kept,)
     assert kept_state.cell.shape == (2, 3, 3)
@@ -267,14 +278,14 @@ def test_initialize_state_from_structure(
 
 
 def test_initialize_state_from_state(
-    ar_sim_state: SimState, device: torch.device
+    ar_supercell_sim_state: SimState, device: torch.device
 ) -> None:
     """Test conversion from SimState to SimState."""
-    state = initialize_state(ar_sim_state, device, torch.float64)
+    state = initialize_state(ar_supercell_sim_state, device, torch.float64)
     assert isinstance(state, SimState)
-    assert state.positions.shape == ar_sim_state.positions.shape
-    assert state.masses.shape == ar_sim_state.masses.shape
-    assert state.cell.shape == ar_sim_state.cell.shape
+    assert state.positions.shape == ar_supercell_sim_state.positions.shape
+    assert state.masses.shape == ar_supercell_sim_state.masses.shape
+    assert state.cell.shape == ar_supercell_sim_state.cell.shape
 
 
 def test_initialize_state_from_atoms(si_atoms: "Atoms", device: torch.device) -> None:
@@ -298,18 +309,20 @@ def test_initialize_state_from_phonopy_atoms(
 
 
 def test_state_pop_method(
-    si_sim_state: SimState, ar_sim_state: SimState, fe_fcc_sim_state: SimState
+    si_sim_state: SimState,
+    ar_supercell_sim_state: SimState,
+    fe_supercell_sim_state: SimState,
 ) -> None:
     """Test the pop method of SimState."""
     # Create a concatenated state
-    states = [si_sim_state, ar_sim_state, fe_fcc_sim_state]
+    states = [si_sim_state, ar_supercell_sim_state, fe_supercell_sim_state]
     concatenated = concatenate_states(states)
 
     # Test popping a single batch
     popped_states = concatenated.pop(1)
     assert len(popped_states) == 1
     assert isinstance(popped_states[0], SimState)
-    assert torch.allclose(popped_states[0].positions, ar_sim_state.positions)
+    assert torch.allclose(popped_states[0].positions, ar_supercell_sim_state.positions)
 
     # Verify the original state was modified
     assert concatenated.n_batches == 2
@@ -320,26 +333,28 @@ def test_state_pop_method(
     popped_multi = multi_state.pop([0, 2])
     assert len(popped_multi) == 2
     assert torch.allclose(popped_multi[0].positions, si_sim_state.positions)
-    assert torch.allclose(popped_multi[1].positions, fe_fcc_sim_state.positions)
+    assert torch.allclose(popped_multi[1].positions, fe_supercell_sim_state.positions)
 
     # Verify the original multi-state was modified
     assert multi_state.n_batches == 1
     assert torch.unique(multi_state.batch).tolist() == [0]
-    assert torch.allclose(multi_state.positions, ar_sim_state.positions)
+    assert torch.allclose(multi_state.positions, ar_supercell_sim_state.positions)
 
 
 def test_state_getitem(
-    si_sim_state: SimState, ar_sim_state: SimState, fe_fcc_sim_state: SimState
+    si_sim_state: SimState,
+    ar_supercell_sim_state: SimState,
+    fe_supercell_sim_state: SimState,
 ) -> None:
     """Test the __getitem__ method of SimState."""
     # Create a concatenated state
-    states = [si_sim_state, ar_sim_state, fe_fcc_sim_state]
+    states = [si_sim_state, ar_supercell_sim_state, fe_supercell_sim_state]
     concatenated = concatenate_states(states)
 
     # Test integer indexing
     single_state = concatenated[1]
     assert isinstance(single_state, SimState)
-    assert torch.allclose(single_state.positions, ar_sim_state.positions)
+    assert torch.allclose(single_state.positions, ar_supercell_sim_state.positions)
     assert single_state.n_batches == 1
 
     # Test list indexing
@@ -347,26 +362,26 @@ def test_state_getitem(
     assert isinstance(multi_state, SimState)
     assert multi_state.n_batches == 2
     assert torch.allclose(multi_state[0].positions, si_sim_state.positions)
-    assert torch.allclose(multi_state[1].positions, fe_fcc_sim_state.positions)
+    assert torch.allclose(multi_state[1].positions, fe_supercell_sim_state.positions)
 
     # Test slice indexing
     slice_state = concatenated[1:3]
     assert isinstance(slice_state, SimState)
     assert slice_state.n_batches == 2
-    assert torch.allclose(slice_state[0].positions, ar_sim_state.positions)
-    assert torch.allclose(slice_state[1].positions, fe_fcc_sim_state.positions)
+    assert torch.allclose(slice_state[0].positions, ar_supercell_sim_state.positions)
+    assert torch.allclose(slice_state[1].positions, fe_supercell_sim_state.positions)
 
     # Test negative indexing
     neg_state = concatenated[-1]
     assert isinstance(neg_state, SimState)
-    assert torch.allclose(neg_state.positions, fe_fcc_sim_state.positions)
+    assert torch.allclose(neg_state.positions, fe_supercell_sim_state.positions)
 
     # Test step in slice
     step_state = concatenated[::2]
     assert isinstance(step_state, SimState)
     assert step_state.n_batches == 2
     assert torch.allclose(step_state[0].positions, si_sim_state.positions)
-    assert torch.allclose(step_state[1].positions, fe_fcc_sim_state.positions)
+    assert torch.allclose(step_state[1].positions, fe_supercell_sim_state.positions)
 
     full_state = concatenated[:]
     assert torch.allclose(full_state.positions, concatenated.positions)
@@ -428,3 +443,159 @@ def test_normalize_batch_indices(si_double_sim_state: SimState) -> None:
         raise ValueError("Should have raised TypeError")
     except TypeError:
         pass
+
+
+def test_row_vector_cell(si_sim_state: SimState) -> None:
+    """Test the row_vector_cell property getter and setter."""
+    # Test getter - should return transposed cell
+    original_cell = si_sim_state.cell.clone()
+    row_vector = si_sim_state.row_vector_cell
+    assert torch.allclose(row_vector, original_cell.transpose(-2, -1))
+
+    # Test setter - should update cell with transposed value
+    new_cell = torch.randn_like(original_cell)
+    si_sim_state.row_vector_cell = new_cell.transpose(-2, -1)
+    assert torch.allclose(si_sim_state.cell, new_cell)
+
+    # Test consistency of getter after setting
+    assert torch.allclose(si_sim_state.row_vector_cell, new_cell.transpose(-2, -1))
+
+
+def test_column_vector_cell(si_sim_state: SimState) -> None:
+    """Test the column_vector_cell property getter and setter."""
+    # Test getter - should return cell directly since it's already in column vector format
+    original_cell = si_sim_state.cell.clone()
+    column_vector = si_sim_state.column_vector_cell
+    assert torch.allclose(column_vector, original_cell)
+
+    # Test setter - should update cell directly
+    new_cell = torch.randn_like(original_cell)
+    si_sim_state.column_vector_cell = new_cell
+    assert torch.allclose(si_sim_state.cell, new_cell)
+
+    # Test consistency of getter after setting
+    assert torch.allclose(si_sim_state.column_vector_cell, new_cell)
+
+
+class DeformState(SimState, DeformGradMixin):
+    """Test class that combines SimState with DeformGradMixin."""
+
+    def __init__(
+        self,
+        *args,
+        velocities: torch.Tensor | None = None,
+        reference_cell: torch.Tensor | None = None,
+        **kwargs,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self.velocities = velocities
+        self.reference_cell = reference_cell
+
+
+@pytest.fixture
+def deform_grad_state(device: torch.device) -> DeformState:
+    """Create a test state with deformation gradient support."""
+
+    positions = torch.randn(10, 3, device=device)
+    masses = torch.ones(10, device=device)
+    velocities = torch.randn(10, 3, device=device)
+    reference_cell = torch.eye(3, device=device).unsqueeze(0)
+    current_cell = 2 * reference_cell
+
+    return DeformState(
+        positions=positions,
+        masses=masses,
+        cell=current_cell,
+        pbc=True,
+        atomic_numbers=torch.ones(10, device=device, dtype=torch.long),
+        velocities=velocities,
+        reference_cell=reference_cell,
+    )
+
+
+def test_deform_grad_momenta(deform_grad_state: DeformState) -> None:
+    """Test momenta calculation in DeformGradMixin."""
+    expected_momenta = deform_grad_state.velocities * deform_grad_state.masses.unsqueeze(
+        -1
+    )
+    assert torch.allclose(deform_grad_state.momenta, expected_momenta)
+
+
+def test_deform_grad_reference_cell(deform_grad_state: DeformState) -> None:
+    """Test reference cell getter/setter in DeformGradMixin."""
+    original_ref_cell = deform_grad_state.reference_cell.clone()
+
+    # Test getter
+    assert torch.allclose(
+        deform_grad_state.reference_row_vector_cell, original_ref_cell.transpose(-2, -1)
+    )
+
+    # Test setter
+    new_ref_cell = 3 * torch.eye(3, device=deform_grad_state.device).unsqueeze(0)
+    deform_grad_state.reference_row_vector_cell = new_ref_cell.transpose(-2, -1)
+    assert torch.allclose(deform_grad_state.reference_cell, new_ref_cell)
+
+
+def test_deform_grad_uniform(deform_grad_state: DeformState) -> None:
+    """Test deformation gradient calculation for uniform deformation."""
+    # For 2x uniform expansion, deformation gradient should be 2x identity matrix
+    deform_grad = deform_grad_state.deform_grad()
+    expected = 2 * torch.eye(3, device=deform_grad_state.device).unsqueeze(0)
+    assert torch.allclose(deform_grad, expected)
+
+
+def test_deform_grad_non_uniform(device: torch.device) -> None:
+    """Test deformation gradient calculation for non-uniform deformation."""
+    reference_cell = torch.eye(3, device=device).unsqueeze(0)
+    current_cell = torch.tensor(
+        [[[2.0, 0.1, 0.0], [0.1, 1.5, 0.0], [0.0, 0.0, 1.8]]], device=device
+    )
+
+    state = DeformState(
+        positions=torch.randn(10, 3, device=device),
+        masses=torch.ones(10, device=device),
+        cell=current_cell,
+        pbc=True,
+        atomic_numbers=torch.ones(10, device=device, dtype=torch.long),
+        velocities=torch.randn(10, 3, device=device),
+        reference_cell=reference_cell,
+    )
+
+    deform_grad = state.deform_grad()
+    # Verify that deformation gradient correctly transforms reference cell to current cell
+    reconstructed_cell = torch.matmul(reference_cell, deform_grad.transpose(-2, -1))
+    assert torch.allclose(reconstructed_cell, current_cell)
+
+
+def test_deform_grad_batched(device: torch.device) -> None:
+    """Test deformation gradient calculation with batched states."""
+    batch_size = 3
+    n_atoms = 10
+
+    reference_cell = torch.eye(3, device=device).unsqueeze(0).repeat(batch_size, 1, 1)
+    current_cell = torch.stack(
+        [
+            2.0 * torch.eye(3, device=device),  # Uniform expansion
+            torch.eye(3, device=device),  # No deformation
+            0.5 * torch.eye(3, device=device),  # Uniform compression
+        ]
+    )
+
+    state = DeformState(
+        positions=torch.randn(n_atoms * batch_size, 3, device=device),
+        masses=torch.ones(n_atoms * batch_size, device=device),
+        cell=current_cell,
+        pbc=True,
+        atomic_numbers=torch.ones(n_atoms * batch_size, device=device, dtype=torch.long),
+        velocities=torch.randn(n_atoms * batch_size, 3, device=device),
+        reference_cell=reference_cell,
+        batch=torch.repeat_interleave(torch.arange(batch_size, device=device), n_atoms),
+    )
+
+    deform_grad = state.deform_grad()
+    assert deform_grad.shape == (batch_size, 3, 3)
+
+    expected_factors = torch.tensor([2.0, 1.0, 0.5], device=device)
+    for i in range(batch_size):
+        expected = expected_factors[i] * torch.eye(3, device=device)
+        assert torch.allclose(deform_grad[i], expected)

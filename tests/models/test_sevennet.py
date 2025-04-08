@@ -1,10 +1,11 @@
 import pytest
 import torch
-from ase.build import bulk
 
-from torch_sim.io import atoms_to_state
-from torch_sim.models.interface import validate_model_outputs
-from torch_sim.state import SimState
+from tests.models.conftest import (
+    consistency_test_simstate_fixtures,
+    make_model_calculator_consistency_test,
+    make_validate_model_outputs_test,
+)
 
 
 try:
@@ -27,13 +28,6 @@ def dtype() -> torch.dtype:
 def model_name() -> str:
     """Fixture to provide the model name for testing."""
     return "sevennet-mf-ompa"
-
-
-@pytest.fixture
-def cu_system(dtype: torch.dtype, device: torch.device) -> SimState:
-    # Create FCC Copper
-    cu_fcc = bulk("Cu", "fcc", a=3.58, cubic=True)
-    return atoms_to_state([cu_fcc], device, dtype)
 
 
 @pytest.fixture
@@ -80,45 +74,14 @@ def test_sevennet_initialization(
     assert model._device == device  # noqa: SLF001
 
 
-def test_sevennet_calculator_consistency(
-    sevenn_model: SevenNetModel,
-    sevenn_calculator: SevenNetCalculator,
-    cu_system: SimState,
-    device: torch.device,
-) -> None:
-    """Test consistency between SevenNetModel and SevenNetCalculator."""
-    # Get SevenNetModel results
-    sevenn_results = sevenn_model.forward(cu_system)
-
-    # Set up ASE calculator
-    cu_fcc = bulk("Cu", "fcc", a=3.58, cubic=True)
-    cu_fcc.calc = sevenn_calculator
-
-    # Get calculator results
-    calc_energy = cu_fcc.get_potential_energy()
-    calc_forces = torch.tensor(
-        cu_fcc.get_forces(),
-        device=device,
-        dtype=sevenn_results["forces"].dtype,
-    )
-
-    # Test consistency with reasonable tolerances
-    torch.testing.assert_close(
-        sevenn_results["energy"].item(),
-        calc_energy,
-        rtol=1e-5,
-        atol=1e-5,
-    )
-    torch.testing.assert_close(
-        sevenn_results["forces"],
-        calc_forces,
-        rtol=1e-5,
-        atol=1e-5,
-    )
+test_sevennet_consistency = make_model_calculator_consistency_test(
+    test_name="sevennet",
+    model_fixture_name="sevenn_model",
+    calculator_fixture_name="sevenn_calculator",
+    sim_state_names=consistency_test_simstate_fixtures,
+)
 
 
-def test_validate_model_outputs(
-    sevenn_model: SevenNetModel, device: torch.device
-) -> None:
-    """Test that the model passes the standard validation."""
-    validate_model_outputs(sevenn_model, device, torch.float32)
+test_sevennet_model_outputs = make_validate_model_outputs_test(
+    model_fixture_name="sevenn_model",
+)

@@ -67,6 +67,98 @@ class BravaisType(Enum):
     TRICLINIC = "triclinic"
 
 
+def get_bravais_type(  # noqa: PLR0911
+    state: SimState, length_tol: float = 1e-3, angle_tol: float = 0.1
+) -> BravaisType:
+    """Check and return the crystal system of a structure.
+
+    This function determines the crystal system by analyzing the lattice
+    parameters and angles without using spglib.
+
+    Args:
+        state: SimState object representing the crystal structure
+        length_tol: Tolerance for floating-point comparisons of lattice lengths
+        angle_tol: Tolerance for floating-point comparisons of lattice angles in degrees
+
+    Returns:
+        BravaisType: Bravais type
+    """
+    # Get cell parameters
+    row_vector_cell = state.row_vector_cell.squeeze()
+    a, b, c = torch.linalg.norm(row_vector_cell, axis=1)
+
+    # Get cell angles in degrees
+    alpha = torch.rad2deg(
+        torch.arccos(torch.dot(row_vector_cell[1], row_vector_cell[2]) / (b * c))
+    )
+    beta = torch.rad2deg(
+        torch.arccos(torch.dot(row_vector_cell[0], row_vector_cell[2]) / (a * c))
+    )
+    gamma = torch.rad2deg(
+        torch.arccos(torch.dot(row_vector_cell[0], row_vector_cell[1]) / (a * b))
+    )
+
+    # Cubic: a = b = c, alpha = beta = gamma = 90°
+    if (
+        abs(a - b) < length_tol
+        and abs(b - c) < length_tol
+        and abs(alpha - 90) < angle_tol
+        and abs(beta - 90) < angle_tol
+        and abs(gamma - 90) < angle_tol
+    ):
+        return BravaisType.CUBIC
+
+    # Hexagonal: a = b ≠ c, alpha = beta = 90°, gamma = 120°
+    if (
+        abs(a - b) < length_tol
+        and abs(alpha - 90) < angle_tol
+        and abs(beta - 90) < angle_tol
+        and abs(gamma - 120) < angle_tol
+    ):
+        return BravaisType.HEXAGONAL
+
+    # Tetragonal: a = b ≠ c, alpha = beta = gamma = 90°
+    if (
+        abs(a - b) < length_tol
+        and abs(a - c) > length_tol
+        and abs(alpha - 90) < angle_tol
+        and abs(beta - 90) < angle_tol
+        and abs(gamma - 90) < angle_tol
+    ):
+        return BravaisType.TETRAGONAL
+
+    # Orthorhombic: a ≠ b ≠ c, alpha = beta = gamma = 90°
+    if (
+        abs(alpha - 90) < angle_tol
+        and abs(beta - 90) < angle_tol
+        and abs(gamma - 90) < angle_tol
+        and abs(a - b) > length_tol
+        and (abs(b - c) > length_tol or abs(a - c) > length_tol)
+    ):
+        return BravaisType.ORTHORHOMBIC
+
+    # Monoclinic: a ≠ b ≠ c, alpha = gamma = 90°, beta ≠ 90°
+    if (
+        abs(alpha - 90) < angle_tol
+        and abs(gamma - 90) < angle_tol
+        and abs(beta - 90) > angle_tol
+    ):
+        return BravaisType.MONOCLINIC
+
+    # Trigonal/Rhombohedral: a = b = c, alpha = beta = gamma ≠ 90°
+    if (
+        abs(a - b) < length_tol
+        and abs(b - c) < length_tol
+        and abs(alpha - beta) < angle_tol
+        and abs(beta - gamma) < angle_tol
+        and abs(alpha - 90) > angle_tol
+    ):
+        return BravaisType.TRIGONAL
+
+    # Triclinic: a ≠ b ≠ c, alpha ≠ beta ≠ gamma ≠ 90°
+    return BravaisType.TRICLINIC
+
+
 def regular_symmetry(strains: torch.Tensor) -> torch.Tensor:
     """Generate equation matrix for cubic (regular) crystal symmetry.
 
@@ -569,17 +661,17 @@ def get_cart_deformed_cell(state: SimState, axis: int = 0, size: float = 1.0) ->
         ValueError: If cell is not a 3x3 tensor
         ValueError: If positions is not a (n_atoms, 3) tensor
     """
-    cell = state.cell.squeeze()
+    row_vector_cell = state.row_vector_cell.squeeze()
     positions = state.positions
     if not (0 <= axis <= 5):
         raise ValueError("Axis must be between 0 and 5")
-    if cell.shape != (3, 3):
+    if row_vector_cell.shape != (3, 3):
         raise ValueError("Cell must be a 3x3 tensor")
     if positions.shape[-1] != 3:
         raise ValueError("Positions must have shape (n_atoms, 3)")
 
     # Create identity matrix for transformation
-    L = torch.eye(3, dtype=cell.dtype, device=cell.device)
+    L = torch.eye(3, dtype=state.dtype, device=state.device)
 
     # Apply deformation based on axis
     if axis < 3:
@@ -592,16 +684,16 @@ def get_cart_deformed_cell(state: SimState, axis: int = 0, size: float = 1.0) ->
         L[0, 1] += size  # xy shear
 
     # Convert positions to fractional coordinates
-    old_inv = torch.linalg.inv(cell)
+    old_inv = torch.linalg.inv(row_vector_cell)
     frac_coords = torch.matmul(positions, old_inv)
 
     # Apply transformation to cell and convert positions back to cartesian
-    new_cell = torch.matmul(cell, L)
-    new_positions = torch.matmul(frac_coords, new_cell)
+    row_vector_cell = torch.matmul(row_vector_cell, L)
+    new_positions = torch.matmul(frac_coords, row_vector_cell)
 
     return SimState(
         positions=new_positions,
-        cell=new_cell.unsqueeze(0),
+        cell=row_vector_cell.transpose(-2, -1).unsqueeze(0),
         masses=state.masses,
         pbc=state.pbc,
         atomic_numbers=state.atomic_numbers,
@@ -665,8 +757,8 @@ def get_elementary_deformations(
 
     # Generate deformed structures
     deformed_states = []
-    device = state.cell.device
-    dtype = state.cell.dtype
+    device = state.device
+    dtype = state.dtype
 
     for axis in allowed_axes:
         if axis < 3:  # Normal strain
@@ -733,8 +825,8 @@ def get_strain(
         reference_state = deformed_state
 
     # Get cell matrices
-    deformed_cell = deformed_state.cell.squeeze()
-    reference_cell = reference_state.cell.squeeze()
+    deformed_cell = deformed_state.row_vector_cell.squeeze()
+    reference_cell = reference_state.row_vector_cell.squeeze()
 
     # Calculate displacement gradient tensor: u = M^(-1)ΔM
     cell_difference = deformed_cell - reference_cell
@@ -1082,7 +1174,7 @@ def calculate_elastic_tensor(
     )
     C = get_elastic_tensor_from_coeffs(C_ij, bravais_type)
 
-    return C  # noqa : RET504
+    return C  # noqa: RET504
 
 
 def calculate_elastic_moduli(C: torch.Tensor) -> tuple[float, float, float, float]:

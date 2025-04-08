@@ -1,10 +1,11 @@
 import pytest
 import torch
-from ase.build import bulk
 
-from torch_sim.io import atoms_to_state
-from torch_sim.models.interface import validate_model_outputs
-from torch_sim.state import SimState
+from tests.models.conftest import (
+    consistency_test_simstate_fixtures,
+    make_model_calculator_consistency_test,
+    make_validate_model_outputs_test,
+)
 
 
 try:
@@ -27,13 +28,6 @@ def dtype() -> torch.dtype:
 def pretrained_orb_model(device: torch.device):
     """Load a pretrained ORB model for testing."""
     return pretrained.orb_v2(device=device)
-
-
-@pytest.fixture
-def cu_system(dtype: torch.dtype, device: torch.device) -> SimState:
-    # Create FCC Copper
-    cu_fcc = bulk("Cu", "fcc", a=3.58, cubic=True)
-    return atoms_to_state([cu_fcc], device, dtype)
 
 
 @pytest.fixture
@@ -72,43 +66,16 @@ def test_orb_initialization(
     assert model._device == device  # noqa: SLF001
 
 
-def test_orb_calculator_consistency(
-    orb_model: OrbModel,
-    orb_calculator: ORBCalculator,
-    cu_system: SimState,
-    device: torch.device,
-) -> None:
-    """Test consistency between OrbModel and ORBCalculator."""
-    # Get OrbModel results
-    orb_results = orb_model.forward(cu_system)
-
-    # Set up ASE calculator
-    cu_fcc = bulk("Cu", "fcc", a=3.58, cubic=True)
-    cu_fcc.calc = orb_calculator
-
-    # Get calculator results
-    calc_energy = cu_fcc.get_potential_energy()
-    calc_forces = torch.tensor(
-        cu_fcc.get_forces(),
-        device=device,
-        dtype=orb_results["forces"].dtype,
-    )
-
-    # Test consistency with reasonable tolerances
-    torch.testing.assert_close(
-        orb_results["energy"].item(),
-        calc_energy,
-        atol=1e-4,
-        rtol=0.5,
-    )
-    torch.testing.assert_close(
-        orb_results["forces"],
-        calc_forces,
-        atol=1e-4,
-        rtol=0.5,
-    )
+test_orb_consistency = make_model_calculator_consistency_test(
+    test_name="orb",
+    model_fixture_name="orb_model",
+    calculator_fixture_name="orb_calculator",
+    sim_state_names=consistency_test_simstate_fixtures,
+    atol=5e-4,
+    rtol=1,
+)
 
 
-def test_validate_model_outputs(orb_model: OrbModel, device: torch.device) -> None:
-    """Test that the model passes the standard validation."""
-    validate_model_outputs(orb_model, device, torch.float32)
+test_validate_model_outputs = make_validate_model_outputs_test(
+    model_fixture_name="orb_model",
+)

@@ -30,7 +30,7 @@ from torch_sim.state import SimState, StateDict
 
 try:
     from mace.cli.convert_e3nn_cueq import run as run_e3nn_to_cueq
-    from mace.tools import atomic_numbers_to_indices, to_one_hot, utils
+    from mace.tools import atomic_numbers_to_indices, utils
 except ImportError:
 
     class MaceModel(torch.nn.Module, ModelInterface):
@@ -43,6 +43,33 @@ except ImportError:
         def __init__(self, *_args: typing.Any, **_kwargs: typing.Any) -> None:
             """Dummy init for type checking."""
             raise ImportError("MACE must be installed to use this model.")
+
+
+def to_one_hot(
+    indices: torch.Tensor, num_classes: int, dtype: torch.dtype
+) -> torch.Tensor:
+    """Generates one-hot encoding from indices.
+
+    NOTE: this is a modified version of the to_one_hot function in mace.tools,
+    consider using upstream version if possible after https://github.com/ACEsuit/mace/pull/903/
+    is merged.
+
+    Args:
+        indices: A tensor of shape (N x 1) containing class indices.
+        num_classes: An integer specifying the total number of classes.
+        dtype: The desired data type of the output tensor.
+
+    Returns:
+        torch.Tensor: A tensor of shape (N x num_classes) containing the
+            one-hot encodings.
+    """
+    shape = indices.shape[:-1] + (num_classes,)
+    oh = torch.zeros(shape, device=indices.device, dtype=dtype).view(shape)
+
+    # scatter_ is the in-place version of scatter
+    oh.scatter_(dim=-1, index=indices, value=1)
+
+    return oh.view(*shape)
 
 
 class MaceModel(torch.nn.Module, ModelInterface):
@@ -72,15 +99,15 @@ class MaceModel(torch.nn.Module, ModelInterface):
     def __init__(
         self,
         model: str | Path | torch.nn.Module | None = None,
+        *,
         device: torch.device | None = None,
         dtype: torch.dtype = torch.float64,
-        atomic_numbers: torch.Tensor | None = None,
-        batch: torch.Tensor | None = None,
-        *,
         neighbor_list_fn: Callable = vesin_nl_ts,
         compute_forces: bool = True,
         compute_stress: bool = True,
         enable_cueq: bool = False,
+        atomic_numbers: torch.Tensor | None = None,
+        batch: torch.Tensor | None = None,
     ) -> None:
         """Initialize the MACE model for energy and force calculations.
 
@@ -112,21 +139,14 @@ class MaceModel(torch.nn.Module, ModelInterface):
             TypeError: If model is neither a path nor a torch.nn.Module.
         """
         super().__init__()
-
-        self._device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self._device = device or torch.device(
+            "cuda" if torch.cuda.is_available() else "cpu"
+        )
         self._dtype = dtype
         self._compute_forces = compute_forces
         self._compute_stress = compute_stress
         self.neighbor_list_fn = neighbor_list_fn
         self._memory_scales_with = "n_atoms_x_density"
-
-        # TODO: can we get rid of this shit?
-        torch.set_default_dtype(self._dtype)
-
-        # print(
-        #     f"Running BatchedMACEForce on device: {self._device} "
-        #     f"with dtype: {self._dtype}"
-        # )
 
         # Load model if provided as path
         if isinstance(model, str | Path):
@@ -137,14 +157,15 @@ class MaceModel(torch.nn.Module, ModelInterface):
         else:
             raise TypeError("Model must be a path or torch.nn.Module")
 
+        self.model = model.to(self._device)
+        self.model = self.model.eval()
+
+        if self._dtype is not None:
+            self.model = self.model.to(dtype=self._dtype)
+
         if enable_cueq:
             print("Converting models to CuEq for acceleration")
-            self.model = run_e3nn_to_cueq(self.model, device=self._device).to(
-                self._device
-            )
-
-        self.model = self.model.to(dtype=self._dtype, device=self._device)
-        self.model.eval()
+            self.model = run_e3nn_to_cueq(self.model)
 
         # Set model properties
         self.r_max = self.model.r_max
@@ -152,7 +173,7 @@ class MaceModel(torch.nn.Module, ModelInterface):
             [int(z) for z in self.model.atomic_numbers]
         )
         self.model.atomic_numbers = torch.tensor(
-            self.model.atomic_numbers.clone(), device=self._device
+            self.model.atomic_numbers.detach().clone(), device=self.device
         )
 
         # Store flag to track if atomic numbers were provided at init
@@ -163,7 +184,7 @@ class MaceModel(torch.nn.Module, ModelInterface):
             if batch is None:
                 # If batch is not provided, assume all atoms belong to same system
                 batch = torch.zeros(
-                    len(atomic_numbers), dtype=torch.long, device=self._device
+                    len(atomic_numbers), dtype=torch.long, device=self.device
                 )
 
             self.setup_from_batch(atomic_numbers, batch)
@@ -195,7 +216,7 @@ class MaceModel(torch.nn.Module, ModelInterface):
             self.n_atoms_per_system.append(n_atoms)
             ptr.append(ptr[-1] + n_atoms)
 
-        self.ptr = torch.tensor(ptr, dtype=torch.long, device=self._device)
+        self.ptr = torch.tensor(ptr, dtype=torch.long, device=self.device)
         self.total_atoms = atomic_numbers.shape[0]
 
         # Create one-hot encodings for all atoms
@@ -203,9 +224,10 @@ class MaceModel(torch.nn.Module, ModelInterface):
             torch.tensor(
                 atomic_numbers_to_indices(atomic_numbers.cpu(), z_table=self.z_table),
                 dtype=torch.long,
-                device=self._device,
+                device=self.device,
             ).unsqueeze(-1),
             num_classes=len(self.z_table),
+            dtype=self.dtype,
         )
 
     def forward(  # noqa: C901
@@ -248,21 +270,6 @@ class MaceModel(torch.nn.Module, ModelInterface):
             raise ValueError(
                 "Atomic numbers cannot be provided in both the constructor and forward."
             )
-        # if atomic_numbers is None and self.atomic_numbers_in_init is False:
-        #     raise ValueError(
-        #         "Atomic numbers must be provided in either the constructor or forward."
-        #     )
-        # if atomic_numbers is not None and self.atomic_numbers_in_init is True:
-        #     raise ValueError(
-        #         "Atomic numbers cannot be provided in both the constructor and forward."
-        #     )
-        # if atomic_numbers is not None and self.atomic_numbers_in_init is False:
-        #     new_atomic_number_tensor = torch.tensor(atomic_numbers, device=self.device)
-        #     if new_atomic_number_tensor != self.atomic_number_tensor:
-        #         self.ptr, self.batch, self.node_attrs = self.compute_atomic_numbers(
-        #             new_atomic_number_tensor, self.z_table, self.device
-        #         )
-        #         self.atomic_number_tensor = new_atomic_number_tensor
 
         # Use batch from init if not provided
         if state.batch is None:
@@ -278,19 +285,10 @@ class MaceModel(torch.nn.Module, ModelInterface):
             and not self.atomic_numbers_in_init
             and not torch.equal(
                 state.atomic_numbers,
-                getattr(self, "atomic_numbers", torch.zeros(0, device=self._device)),
+                getattr(self, "atomic_numbers", torch.zeros(0, device=self.device)),
             )
         ):
             self.setup_from_batch(state.atomic_numbers, state.batch)
-
-        cell = state.cell
-        positions = state.positions
-        pbc = state.pbc
-        # Ensure cell has correct shape
-        # if cell is None:
-        #     cell = torch.zeros(
-        #         (self.n_systems, 3, 3), device=self._device, dtype=self._dtype
-        #     )
 
         # Process each system's neighbor list separately
         edge_indices = []
@@ -302,26 +300,25 @@ class MaceModel(torch.nn.Module, ModelInterface):
         for b in range(self.n_systems):
             batch_mask = state.batch == b
             # Calculate neighbor list for this system
-            mapping, shifts_idx = self.neighbor_list_fn(
-                positions=positions[batch_mask],
-                cell=cell[b],
-                pbc=pbc,
+            edge_idx, shifts_idx = self.neighbor_list_fn(
+                positions=state.positions[batch_mask],
+                cell=state.row_vector_cell[b],
+                pbc=state.pbc,
                 cutoff=self.r_max,
             )
 
             # Adjust indices for the batch
-            mapping = mapping + offset
+            edge_idx = edge_idx + offset
+            shifts = torch.mm(shifts_idx, state.row_vector_cell[b])
 
-            edge_indices.append(mapping)
+            edge_indices.append(edge_idx)
             unit_shifts_list.append(shifts_idx)
-            shifts = torch.mm(shifts_idx, cell[b])
             shifts_list.append(shifts)
 
             offset += len(state.positions[batch_mask])
 
         # Combine all neighbor lists
         edge_index = torch.cat(edge_indices, dim=1)
-        shifts = torch.cat(shifts_list, dim=0)
         unit_shifts = torch.cat(unit_shifts_list, dim=0)
 
         # Get model output
@@ -330,12 +327,12 @@ class MaceModel(torch.nn.Module, ModelInterface):
                 ptr=self.ptr,
                 node_attrs=self.node_attrs,
                 batch=state.batch,
-                pbc=pbc,
-                cell=cell,
-                positions=positions,
+                pbc=state.pbc,
+                cell=state.row_vector_cell,
+                positions=state.positions,
                 edge_index=edge_index,
                 unit_shifts=unit_shifts,
-                shifts=shifts,
+                shifts=shifts_list,
             ),
             compute_force=self._compute_forces,
             compute_stress=self._compute_stress,
@@ -348,7 +345,7 @@ class MaceModel(torch.nn.Module, ModelInterface):
         if energy is not None:
             results["energy"] = energy.detach()
         else:
-            results["energy"] = torch.zeros(self.n_systems, device=self._device)
+            results["energy"] = torch.zeros(self.n_systems, device=self.device)
 
         # Process forces
         if self._compute_forces:

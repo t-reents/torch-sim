@@ -1,5 +1,7 @@
+import itertools
 from typing import Any
 
+import pytest
 import torch
 from ase import Atoms
 from phonopy.structure.atoms import PhonopyAtoms
@@ -91,9 +93,9 @@ def test_multiple_atoms_to_state(si_atoms: Atoms, device: torch.device) -> None:
     )
 
 
-def test_state_to_structure(ar_sim_state: SimState) -> None:
+def test_state_to_structure(ar_supercell_sim_state: SimState) -> None:
     """Test conversion from state tensors to list of pymatgen Structure."""
-    structures = state_to_structures(ar_sim_state)
+    structures = state_to_structures(ar_supercell_sim_state)
     assert len(structures) == 1
     assert isinstance(structures[0], Structure)
     assert len(structures[0]) == 32
@@ -109,9 +111,9 @@ def test_state_to_multiple_structures(ar_double_sim_state: SimState) -> None:
     assert len(structures[1]) == 32
 
 
-def test_state_to_atoms(ar_sim_state: SimState) -> None:
+def test_state_to_atoms(ar_supercell_sim_state: SimState) -> None:
     """Test conversion from state tensors to list of ASE Atoms."""
-    atoms = state_to_atoms(ar_sim_state)
+    atoms = state_to_atoms(ar_supercell_sim_state)
     assert len(atoms) == 1
     assert isinstance(atoms[0], Atoms)
     assert len(atoms[0]) == 32
@@ -127,15 +129,15 @@ def test_state_to_multiple_atoms(ar_double_sim_state: SimState) -> None:
     assert len(atoms[1]) == 32
 
 
-def test_to_atoms(ar_sim_state: SimState) -> None:
+def test_to_atoms(ar_supercell_sim_state: SimState) -> None:
     """Test conversion from SimState to list of ASE Atoms."""
-    atoms = state_to_atoms(ar_sim_state)
+    atoms = state_to_atoms(ar_supercell_sim_state)
     assert isinstance(atoms[0], Atoms)
 
 
-def test_to_structures(ar_sim_state: SimState) -> None:
+def test_to_structures(ar_supercell_sim_state: SimState) -> None:
     """Test conversion from SimState to list of Pymatgen Structure."""
-    structures = state_to_structures(ar_sim_state)
+    structures = state_to_structures(ar_supercell_sim_state)
     assert isinstance(structures[0], Structure)
 
 
@@ -180,9 +182,9 @@ def test_multiple_phonopy_to_state(si_phonopy_atoms: Any, device: torch.device) 
     )
 
 
-def test_state_to_phonopy(ar_sim_state: SimState) -> None:
+def test_state_to_phonopy(ar_supercell_sim_state: SimState) -> None:
     """Test conversion from state tensors to list of PhonopyAtoms."""
-    phonopy_atoms = state_to_phonopy(ar_sim_state)
+    phonopy_atoms = state_to_phonopy(ar_supercell_sim_state)
     assert len(phonopy_atoms) == 1
     assert isinstance(phonopy_atoms[0], PhonopyAtoms)
     assert len(phonopy_atoms[0]) == 32
@@ -196,3 +198,66 @@ def test_state_to_multiple_phonopy(ar_double_sim_state: SimState) -> None:
     assert isinstance(phonopy_atoms[1], PhonopyAtoms)
     assert len(phonopy_atoms[0]) == 32
     assert len(phonopy_atoms[1]) == 32
+
+
+@pytest.mark.parametrize(
+    ("sim_state_name", "conversion_functions"),
+    list(
+        itertools.product(
+            [
+                "ar_supercell_sim_state",
+                "si_sim_state",
+                "ti_sim_state",
+                "sio2_sim_state",
+                "fe_supercell_sim_state",
+                "cu_sim_state",
+                "ar_double_sim_state",
+                "mixed_double_sim_state",
+                # TODO: round trip benzene/non-pbc systems
+            ],
+            [
+                (state_to_atoms, atoms_to_state),
+                (state_to_structures, structures_to_state),
+                (state_to_phonopy, phonopy_to_state),
+            ],
+        )
+    ),
+)
+def test_state_round_trip(
+    sim_state_name: str,
+    conversion_functions: tuple,
+    request: pytest.FixtureRequest,
+    device: torch.device,
+    dtype: torch.dtype,
+) -> None:
+    """Test round-trip conversion from SimState through various formats and back.
+
+    Args:
+        sim_state_name: Name of the sim_state fixture to test
+        conversion_functions: Tuple of (to_format, from_format) conversion functions
+        request: Pytest fixture request object to get dynamic fixtures
+        device: Device to run tests on
+        dtype: Data type to use
+    """
+    # Get the sim_state fixture dynamically using the name
+    sim_state: SimState = request.getfixturevalue(sim_state_name)
+    to_format_fn, from_format_fn = conversion_functions
+    unique_batches = torch.unique(sim_state.batch)
+
+    # Convert to intermediate format
+    intermediate_format = to_format_fn(sim_state)
+    assert len(intermediate_format) == len(unique_batches)
+
+    # Convert back to state
+    round_trip_state: SimState = from_format_fn(intermediate_format, device, dtype)
+
+    # Check that all properties match
+    assert torch.allclose(sim_state.positions, round_trip_state.positions)
+    assert torch.allclose(sim_state.cell, round_trip_state.cell)
+    assert torch.all(sim_state.atomic_numbers == round_trip_state.atomic_numbers)
+    assert torch.all(sim_state.batch == round_trip_state.batch)
+    assert sim_state.pbc == round_trip_state.pbc
+
+    if isinstance(intermediate_format[0], Atoms):
+        # TODO: the round trip for pmg and phonopy masses is not exact.
+        assert torch.allclose(sim_state.masses, round_trip_state.masses)

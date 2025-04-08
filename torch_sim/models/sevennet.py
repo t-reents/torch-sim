@@ -99,7 +99,7 @@ class SevenNetModel(torch.nn.Module, ModelInterface):
             raise ValueError("Model cutoff seems not initialized")
 
         model.eval_type_map = torch.tensor(
-            True  # noqa: FBT003
+            data=True,
         )  # TODO: from sevenn not sure if needed
         model.set_is_batch_data(True)
         model_loaded = model
@@ -123,10 +123,9 @@ class SevenNetModel(torch.nn.Module, ModelInterface):
                 stacklevel=2,
             )
 
-        self.model.to(self.device)
-        self.model.eval()
-
         self.model = model.to(self._device)
+        self.model = self.model.eval()
+
         if self._dtype is not None:
             self.model = self.model.to(dtype=self._dtype)
 
@@ -172,31 +171,33 @@ class SevenNetModel(torch.nn.Module, ModelInterface):
             batch_mask = state.batch == b
 
             pos = state.positions[batch_mask]
-            cell = state.cell[b]
+            # SevenNet uses row vector cell convention for neighbor list
+            row_vector_cell = state.row_vector_cell[b]
             pbc = state.pbc
             atomic_numbers = state.atomic_numbers[batch_mask]
 
             edge_idx, shifts_idx = self.neighbor_list_fn(
                 positions=pos,
-                cell=cell,
+                cell=row_vector_cell,
                 pbc=pbc,
                 cutoff=self.cutoff,
             )
 
-            shifts = torch.mm(shifts_idx, cell)
-
-            edge_vec = pos[edge_idx[0]] - pos[edge_idx[1]] - shifts
+            shifts = torch.mm(shifts_idx, row_vector_cell)
+            edge_vec = pos[edge_idx[1]] - pos[edge_idx[0]] + shifts
 
             data = {
                 key.NODE_FEATURE: atomic_numbers,
-                key.ATOMIC_NUMBERS: atomic_numbers.to(dtype=torch.int64),
+                key.ATOMIC_NUMBERS: atomic_numbers.to(
+                    dtype=torch.int64, device=self.device
+                ),
                 key.POS: pos,
                 key.EDGE_IDX: edge_idx,
                 key.EDGE_VEC: edge_vec,
-                key.CELL: cell,
-                key.CELL_SHIFT: shifts,
-                key.CELL_VOLUME: torch.det(cell),
-                key.NUM_ATOMS: torch.tensor(len(atomic_numbers)),
+                key.CELL: row_vector_cell,
+                key.CELL_SHIFT: shifts_idx,
+                key.CELL_VOLUME: torch.det(row_vector_cell),
+                key.NUM_ATOMS: torch.tensor(len(atomic_numbers), device=self.device),
                 key.DATA_MODALITY: self.modal,
             }
             data[key.INFO] = {}
@@ -205,9 +206,6 @@ class SevenNetModel(torch.nn.Module, ModelInterface):
             data_list.append(data)
 
         batched_data = Collater([], follow_batch=None, exclude_keys=None)(data_list)
-
-        # if self.modal:
-        #     batched_data[key.DATA_MODALITY] = self.modal
         batched_data.to(self.device)
 
         if isinstance(self.model, torch_script_type):
@@ -226,19 +224,18 @@ class SevenNetModel(torch.nn.Module, ModelInterface):
         output = self.model(batched_data)
 
         results = {}
-        # Process energy
         energy = output[key.PRED_TOTAL_ENERGY]
         if energy is not None:
             results["energy"] = energy.detach()
         else:
-            results["energy"] = torch.zeros(self.n_systems, device=self._device)
+            results["energy"] = torch.zeros(
+                state.batch.max().item() + 1, device=self.device
+            )
 
-        # Process forces
         forces = output[key.PRED_FORCE]
         if forces is not None:
             results["forces"] = forces.detach()
 
-        # Process stress
         stress = output[key.PRED_STRESS]
         if stress is not None:
             results["stress"] = voigt_6_to_full_3x3_stress(stress.detach())

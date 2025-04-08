@@ -47,7 +47,6 @@ StateDict = dict[
 ]
 
 
-# TODO: change later on
 @dataclass
 class SimState:
     """State representation for atomistic systems with batched operations support.
@@ -66,7 +65,11 @@ class SimState:
     Attributes:
         positions (torch.Tensor): Atomic positions with shape (n_atoms, 3)
         masses (torch.Tensor): Atomic masses with shape (n_atoms,)
-        cell (torch.Tensor): Unit cell vectors with shape (n_batches, 3, 3)
+        cell (torch.Tensor): Unit cell vectors with shape (n_batches, 3, 3).
+            Note that we use a column vector convention, i.e. the cell vectors are
+            stored as `[[a1, b1, c1], [a2, b2, c2], [a3, b3, c3]]` as opposed to
+            the row vector convention `[[a1, a2, a3], [b1, b2, b3], [c1, c2, c3]]`
+            used by ASE.
         pbc (bool): Boolean indicating whether to use periodic boundary conditions
         atomic_numbers (torch.Tensor): Atomic numbers with shape (n_atoms,)
         batch (torch.Tensor, optional): Batch indices with shape (n_atoms,),
@@ -193,6 +196,42 @@ class SimState:
         """
         return torch.det(self.cell) if self.pbc else None
 
+    @property
+    def column_vector_cell(self) -> torch.Tensor:
+        """Get the unit cell following the column vector convention.
+
+        Returns:
+            The unit cell in a column vector format
+        """
+        return self.cell
+
+    @column_vector_cell.setter
+    def column_vector_cell(self, value: torch.Tensor) -> None:
+        """Set the unit cell from value following the column vector convention.
+
+        Args:
+            value: The unit cell as a column vector
+        """
+        self.cell = value
+
+    @property
+    def row_vector_cell(self) -> torch.Tensor:
+        """Get the unit cell following the row vector convention.
+
+        Returns:
+            The unit cell in a row vector format
+        """
+        return self.cell.transpose(-2, -1)
+
+    @row_vector_cell.setter
+    def row_vector_cell(self, value: torch.Tensor) -> None:
+        """Set the unit cell from value following the row vector convention.
+
+        Args:
+            value: The unit cell as a row vector
+        """
+        self.cell = value.transpose(-2, -1)
+
     def clone(self) -> Self:
         """Create a deep copy of the SimState.
 
@@ -308,6 +347,50 @@ class SimState:
         )
 
         return _slice_state(self, batch_indices)
+
+
+class DeformGradMixin:
+    """Mixin for states that support deformation gradients."""
+
+    @property
+    def momenta(self) -> torch.Tensor:
+        """Calculate momenta from velocities and masses.
+
+        Returns:
+            The momenta of the particles
+        """
+        return self.velocities * self.masses.unsqueeze(-1)
+
+    @property
+    def reference_row_vector_cell(self) -> torch.Tensor:
+        """Get the original unit cell in terms of row vectors."""
+        return self.reference_cell.transpose(-2, -1)
+
+    @reference_row_vector_cell.setter
+    def reference_row_vector_cell(self, value: torch.Tensor) -> None:
+        """Set the original unit cell in terms of row vectors."""
+        self.reference_cell = value.transpose(-2, -1)
+
+    @staticmethod
+    def _deform_grad(
+        reference_row_vector_cell: torch.Tensor, row_vector_cell: torch.Tensor
+    ) -> torch.Tensor:
+        """Calculate the deformation gradient from original cell to current cell.
+
+        Returns:
+            The deformation gradient
+        """
+        return torch.linalg.solve(reference_row_vector_cell, row_vector_cell).transpose(
+            -2, -1
+        )
+
+    def deform_grad(self) -> torch.Tensor:
+        """Calculate the deformation gradient from original cell to current cell.
+
+        Returns:
+            The deformation gradient
+        """
+        return self._deform_grad(self.reference_row_vector_cell, self.row_vector_cell)
 
 
 def _normalize_batch_indices(

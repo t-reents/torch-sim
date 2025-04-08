@@ -204,7 +204,6 @@ class FairChemModel(torch.nn.Module, ModelInterface):
             config["model_attributes"]["name"] = config.pop("model")
             config["model"] = config["model_attributes"]
 
-        self.pbc = True
         self.neighbor_list_fn = neighbor_list_fn
 
         if neighbor_list_fn is None:
@@ -216,7 +215,6 @@ class FairChemModel(torch.nn.Module, ModelInterface):
             )
 
         if "backbone" in config["model"]:
-            config["model"]["backbone"]["use_pbc"] = self.pbc
             config["model"]["backbone"]["use_pbc_single"] = False
             if dtype is not None:
                 try:
@@ -228,7 +226,6 @@ class FairChemModel(torch.nn.Module, ModelInterface):
                 except KeyError:
                     print("dtype not found in backbone, using default float32")
         else:
-            config["model"]["use_pbc"] = self.pbc
             config["model"]["use_pbc_single"] = False
             if dtype is not None:
                 try:
@@ -259,9 +256,12 @@ class FairChemModel(torch.nn.Module, ModelInterface):
             amp=False if dtype is not None else config.get("amp", False),
             inference_only=True,
         )
+
+        self.trainer.model = self.trainer.model.eval()
+
         if dtype is not None:
             # Convert model parameters to specified dtype
-            self.trainer.model.to(dtype=self.dtype)
+            self.trainer.model = self.trainer.model.to(dtype=self.dtype)
 
         if model is not None:
             self.load_checkpoint(checkpoint_path=model, checkpoint=checkpoint)
@@ -331,8 +331,6 @@ class FairChemModel(torch.nn.Module, ModelInterface):
         """
         if isinstance(state, dict):
             state = SimState(**state, masses=torch.ones_like(state["positions"]))
-        if state.pbc is False:
-            raise ValueError("PBC must be True for FairChemModel")
 
         if state.device != self._device:
             state = state.to(self._device)
@@ -340,17 +338,14 @@ class FairChemModel(torch.nn.Module, ModelInterface):
         if state.batch is None:
             state.batch = torch.zeros(state.positions.shape[0], dtype=torch.int)
 
-        cell = state.cell
-        positions = state.positions
-
         natoms = torch.bincount(state.batch)
         pbc = torch.tensor(
-            [self.pbc, self.pbc, self.pbc] * len(natoms), dtype=torch.bool
+            [state.pbc, state.pbc, state.pbc] * len(natoms), dtype=torch.bool
         ).view(-1, 3)
         fixed = torch.zeros((state.batch.size(0), natoms.sum()), dtype=torch.int)
         self.data_object = Batch(
-            pos=positions,
-            cell=cell,
+            pos=state.positions,
+            cell=state.row_vector_cell,
             atomic_numbers=state.atomic_numbers,
             natoms=natoms,
             batch=state.batch,
