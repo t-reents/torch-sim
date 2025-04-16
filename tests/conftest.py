@@ -190,7 +190,11 @@ def sio2_sim_state(device: torch.device, dtype: torch.dtype) -> SimState:
 
 
 @pytest.fixture
-def rattled_sio2_sim_state(sio2_sim_state: SimState) -> SimState:
+def rattled_sio2_sim_state(
+    sio2_sim_state: SimState,
+    device: torch.device,
+    dtype: torch.dtype,
+) -> SimState:
     """Create a rattled SiO2 system for testing."""
     sim_state = sio2_sim_state.clone()
 
@@ -200,9 +204,9 @@ def rattled_sio2_sim_state(sio2_sim_state: SimState) -> SimState:
         # Temporarily set a fixed seed
         torch.manual_seed(3)
         weibull = torch.distributions.weibull.Weibull(scale=0.1, concentration=1)
-        rnd = torch.randn_like(sim_state.positions)
-        rnd = rnd / torch.norm(rnd, dim=-1, keepdim=True)
-        shifts = weibull.sample(rnd.shape) * rnd
+        rnd = torch.randn_like(sim_state.positions, device=device, dtype=dtype)
+        rnd = rnd / torch.norm(rnd, dim=-1, keepdim=True).to(device=device)
+        shifts = weibull.sample(rnd.shape).to(device=device) * rnd
         sim_state.positions = sim_state.positions + shifts
     finally:
         # Restore the original RNG state
