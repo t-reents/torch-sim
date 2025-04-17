@@ -15,8 +15,9 @@ import torch
 from torch_sim.autobatching import BinningAutoBatcher, InFlightAutoBatcher
 from torch_sim.models.interface import ModelInterface
 from torch_sim.quantities import batchwise_max_force, calc_kinetic_energy, calc_kT
-from torch_sim.state import SimState, StateLike, concatenate_states, initialize_state
+from torch_sim.state import SimState, concatenate_states, initialize_state
 from torch_sim.trajectory import TrajectoryReporter
+from torch_sim.typing import StateLike
 from torch_sim.units import UnitSystem
 
 
@@ -130,9 +131,7 @@ def integrate(
     # create a list of temperatures
     temps = temperature if hasattr(temperature, "__iter__") else [temperature] * n_steps
     if len(temps) != n_steps:
-        raise ValueError(
-            f"len(temperature) = {len(temps)}. It must equal n_steps = {n_steps}"
-        )
+        raise ValueError(f"{len(temps)=:,}. It must equal n_steps = {n_steps=:,}")
 
     # initialize the state
     state: SimState = initialize_state(system, model.device, model.dtype)

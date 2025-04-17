@@ -21,7 +21,8 @@ from typing import Any
 import torch
 
 import torch_sim.math as tsm
-from torch_sim.state import DeformGradMixin, SimState, StateDict
+from torch_sim.state import DeformGradMixin, SimState
+from torch_sim.typing import StateDict
 
 
 @dataclass
@@ -76,8 +77,7 @@ def gradient_descent(
         The learning rate controls the step size during optimization. Larger values can
         speed up convergence but may cause instability in the optimization process.
     """
-    device = model.device
-    dtype = model.dtype
+    device, dtype = model.device, model.dtype
 
     def gd_init(
         state: SimState | StateDict,
@@ -242,8 +242,7 @@ def unit_cell_gradient_descent(  # noqa: PLR0915, C901
         - Larger values for positions_lr and cell_lr can speed up convergence but
           may cause instability in the optimization process
     """
-    device = model.device
-    dtype = model.dtype
+    device, dtype = model.device, model.dtype
 
     def gd_init(
         state: SimState,
@@ -520,8 +519,7 @@ def fire(
         - The algorithm adaptively adjusts step sizes and mixing parameters based
           on the dot product of forces and velocities
     """
-    device = model.device
-    dtype = model.dtype
+    device, dtype = model.device, model.dtype
 
     eps = 1e-8 if dtype == torch.float32 else 1e-16
 
@@ -807,20 +805,14 @@ def unit_cell_fire(  # noqa: C901, PLR0915
         - The cell_factor parameter controls the relative scale of atomic vs cell
           optimization
     """
-    device = model.device
-    dtype = model.dtype
+    device, dtype = model.device, model.dtype
 
     eps = 1e-8 if dtype == torch.float32 else 1e-16
 
     # Setup parameters
     params = [dt_max, dt_start, alpha_start, f_inc, f_dec, f_alpha, n_min]
     dt_max, dt_start, alpha_start, f_inc, f_dec, f_alpha, n_min = [
-        (
-            p
-            if isinstance(p, torch.Tensor)
-            else torch.tensor(p, device=device, dtype=dtype)
-        )
-        for p in params
+        torch.as_tensor(p, device=device, dtype=dtype) for p in params
     ]
 
     def fire_init(
@@ -1221,20 +1213,14 @@ def frechet_cell_fire(  # noqa: C901, PLR0915
         - To fix the cell and only optimize atomic positions, set both
           constant_volume=True and hydrostatic_strain=True
     """
-    device = model.device
-    dtype = model.dtype
+    device, dtype = model.device, model.dtype
 
     eps = 1e-8 if dtype == torch.float32 else 1e-16
 
     # Setup parameters
     params = [dt_max, dt_start, alpha_start, f_inc, f_dec, f_alpha, n_min]
     dt_max, dt_start, alpha_start, f_inc, f_dec, f_alpha, n_min = [
-        (
-            p
-            if isinstance(p, torch.Tensor)
-            else torch.tensor(p, device=device, dtype=dtype)
-        )
-        for p in params
+        torch.as_tensor(p, device=device, dtype=dtype) for p in params
     ]
 
     def fire_init(

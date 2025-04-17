@@ -19,7 +19,7 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 dtype = torch.float32
 
 # Option 1: Load the raw model from the downloaded model
-mace_checkpoint_url = "https://github.com/ACEsuit/mace-mp/releases/download/mace_mpa_0/mace-mpa-0-medium.model"
+mace_checkpoint_url = "https://github.com/ACEsuit/mace-foundations/releases/download/mace_mpa_0/mace-mpa-0-medium.model"
 loaded_model = mace_mp(
     model=mace_checkpoint_url,
     return_raw_model=True,
@@ -51,6 +51,6 @@ state = ts.io.atoms_to_state(si_dc, device=device, dtype=dtype)
 results = model(state)
 
 # Print results
-print(f"Energy: {results['energy']}")
+print(f"Energy: {float(results['energy']):.4f}")
 print(f"Forces: {results['forces']}")
 print(f"Stress: {results['stress']}")

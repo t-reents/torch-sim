@@ -21,11 +21,11 @@ Online Resources:
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from enum import Enum
 
 import torch
 
 from torch_sim.state import SimState
+from torch_sim.typing import BravaisType
 
 
 @dataclass
@@ -45,26 +45,6 @@ class DeformationRule:
 
     axes: list[int]
     symmetry_handler: Callable
-
-
-class BravaisType(Enum):
-    """Enumeration of the seven Bravais lattice types in 3D crystals.
-
-    These lattice types represent the distinct crystal systems classified
-    by their symmetry properties, from highest symmetry (cubic) to lowest
-    symmetry (triclinic).
-
-    Each type has specific constraints on lattice parameters and angles,
-    which determine the number of independent elastic constants.
-    """
-
-    CUBIC = "cubic"
-    HEXAGONAL = "hexagonal"
-    TRIGONAL = "trigonal"
-    TETRAGONAL = "tetragonal"
-    ORTHORHOMBIC = "orthorhombic"
-    MONOCLINIC = "monoclinic"
-    TRICLINIC = "triclinic"
 
 
 def get_bravais_type(  # noqa: PLR0911
@@ -931,9 +911,9 @@ def get_elastic_coeffs(
         bravais_type: Crystal system (BravaisType enum)
 
     Returns:
-        Tuple containing:
+        tuple containing:
         - torch.Tensor: Cij elastic constants
-        - Tuple containing:
+        - tuple containing:
             - torch.Tensor: Bij Birch coefficients
             - torch.Tensor: Residuals from least squares fit
             - int: Rank of solution

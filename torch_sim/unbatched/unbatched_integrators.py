@@ -7,8 +7,9 @@ from typing import Any
 import torch
 
 from torch_sim.quantities import calc_kinetic_energy, count_dof
-from torch_sim.state import SimState, StateDict
+from torch_sim.state import SimState
 from torch_sim.transforms import pbc_wrap_general
+from torch_sim.typing import StateDict
 
 
 @dataclass
@@ -228,8 +229,7 @@ def nve(
         - Initial velocities sampled from Maxwell-Boltzmann distribution
         - Model must return dict with 'energy' and 'forces' keys
     """
-    device = model.device
-    dtype = model.dtype
+    device, dtype = model.device, model.dtype
 
     def nve_init(
         state: SimState | StateDict,
@@ -348,8 +348,7 @@ def nvt_langevin(
         - Preserves detailed balance for correct NVT sampling
         - Handles periodic boundary conditions if enabled in state
     """
-    device = model.device
-    dtype = model.dtype
+    device, dtype = model.device, model.dtype
     gamma = gamma or 1 / (100 * dt)
 
     if isinstance(gamma, float):
@@ -565,8 +564,7 @@ def npt_langevin(  # noqa: C901, PLR0915
             - Callable[[MDState, torch.Tensor], MDState]: Update function that evolves
               system by one timestep
     """
-    device = model.device
-    dtype = model.dtype
+    device, dtype = model.device, model.dtype
 
     # Set default values for coupling parameters if not provided
     alpha = alpha or 1 / (100 * dt)
@@ -1372,7 +1370,7 @@ def nvt_nose_hoover(
         sy_steps: Number of Suzuki-Yoshida steps - must be 1, 3, 5, or 7 (default: 3)
 
     Returns:
-        Tuple containing:
+        tuple containing:
         - Initialization function that takes a state and returns NVTNoseHooverState
         - Update function that performs one complete integration step
 
@@ -1396,8 +1394,7 @@ def nvt_nose_hoover(
         4. Update chain kinetic energy
         5. Second half-step of chain evolution
     """
-    device = model.device
-    dtype = model.dtype
+    device, dtype = model.device, model.dtype
 
     def nvt_nose_hoover_init(
         state: SimState | StateDict,
@@ -1696,8 +1693,7 @@ def npt_nose_hoover(  # noqa: C901, PLR0915
         - Cell dynamics use logarithmic coordinates for volume updates
         - Conserves extended system Hamiltonian
     """
-    device = model.device
-    dtype = model.dtype
+    device, dtype = model.device, model.dtype
 
     def _npt_cell_info(
         state: NPTNoseHooverState,

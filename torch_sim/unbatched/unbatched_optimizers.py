@@ -6,7 +6,8 @@ from dataclasses import dataclass
 import torch
 
 import torch_sim.math as tsm
-from torch_sim.state import DeformGradMixin, SimState, StateDict
+from torch_sim.state import DeformGradMixin, SimState
+from torch_sim.typing import StateDict
 from torch_sim.unbatched.unbatched_integrators import velocity_verlet
 
 
@@ -47,19 +48,18 @@ def gradient_descent(
     energy surfaces.
 
     Args:
-        model: Neural network model that computes energies and forces
-        lr: Step size for position updates (default: 0.01)
+        model (torch.nn.Module): Neural network model that computes energies and forces
+        lr (float): Step size for position updates (default: 0.01)
 
     Returns:
-        Tuple containing:
+        tuple containing:
         - Initialization function that creates the initial GDState
         - Update function that performs one gradient descent step
 
     Notes:
         - Best suited for systems close to their minimum energy configuration
     """
-    device = model.device
-    dtype = model.dtype
+    device, dtype = model.device, model.dtype
 
     # Convert learning rate to tensor
     if not isinstance(lr, torch.Tensor):
@@ -194,14 +194,12 @@ def fire(
     References:
         - Bitzek et al., PRL 97, 170201 (2006) - Original FIRE paper
     """
-    device = model.device
-    dtype = model.dtype
+    device, dtype = model.device, model.dtype
 
     # Convert parameters to tensors
     params = [dt_max, n_min, f_inc, f_dec, f_alpha, dt_start, alpha_start]
     dt_max, n_min, f_inc, f_dec, f_alpha, dt_start, alpha_start = [
-        p if isinstance(p, torch.Tensor) else torch.tensor(p, device=device, dtype=dtype)
-        for p in params
+        torch.as_tensor(p, device=device, dtype=dtype) for p in params
     ]
 
     def fire_init(state: SimState | StateDict, **kwargs) -> FIREState:
@@ -358,7 +356,7 @@ def fire_ase(  # noqa: PLR0915
         downhill_check: Whether to verify energy decreases each step (default: False)
 
     Returns:
-        Tuple containing:
+        tuple containing:
         - Initial FIREState with system state and optimization parameters
         - Update function that performs one FIRE step
     Notes:
@@ -376,16 +374,14 @@ def fire_ase(  # noqa: PLR0915
         - Bitzek et al., PRL 97, 170201 (2006) - Original FIRE paper
         - ASE implementation: https://wiki.fysik.dtu.dk/ase/ase/optimize.html
     """
-    device = model.device
-    dtype = model.dtype
+    device, dtype = model.device, model.dtype
 
     eps = 1e-8 if dtype == torch.float32 else 1e-16
 
     # Convert scalar parameters to tensors
     params = [dt, dt_max, max_step, f_inc, f_dec, f_alpha, alpha_start]
     dt, dt_max, max_step, f_inc, f_dec, f_alpha, alpha_start = [
-        p if isinstance(p, torch.Tensor) else torch.tensor(p, device=device, dtype=dtype)
-        for p in params
+        torch.as_tensor(p, device=device, dtype=dtype) for p in params
     ]
 
     def fire_init(state: SimState | StateDict, **kwargs) -> FIREState:
@@ -581,20 +577,18 @@ def unit_cell_fire(  # noqa: PLR0915, C901
         cell_factor: Scaling factor for cell optimization (default: number of atoms)
 
     Returns:
-        Tuple containing:
+        tuple containing:
         - Initialization function that creates a UnitCellFIREState
         - Update function that performs one FIRE step
     """
-    device = model.device
-    dtype = model.dtype
+    device, dtype = model.device, model.dtype
 
     eps = 1e-8 if dtype == torch.float32 else 1e-16
 
     # Setup parameters
     params = [dt_max, dt_start, alpha_start, f_inc, f_dec, f_alpha, n_min]
     dt_max, dt_start, alpha_start, f_inc, f_dec, f_alpha, n_min = [
-        p if isinstance(p, torch.Tensor) else torch.tensor(p, device=device, dtype=dtype)
-        for p in params
+        torch.as_tensor(p, device=device, dtype=dtype) for p in params
     ]
 
     def fire_init(
@@ -888,7 +882,7 @@ def frechet_cell_fire(  # noqa: PLR0915, C901
         cell_factor: Scaling factor for cell optimization (default: number of atoms)
 
     Returns:
-        Tuple containing:
+        tuple containing:
         - Initialization function that creates a FrechetCellFIREState
         - Update function that performs one FIRE step with Frechet derivatives
 
@@ -896,16 +890,14 @@ def frechet_cell_fire(  # noqa: PLR0915, C901
         - https://github.com/lan496/lan496.github.io/blob/main/notes/cell_grad.pdf
         - https://github.com/JuliaMolSim/JuLIP.jl/blob/master/src/expcell.jl
     """
-    device = model.device
-    dtype = model.dtype
+    device, dtype = model.device, model.dtype
 
     eps = 1e-8 if dtype == torch.float32 else 1e-16
 
     # Setup parameters
     params = [dt_max, dt_start, alpha_start, f_inc, f_dec, f_alpha]
     dt_max, dt_start, alpha_start, f_inc, f_dec, f_alpha = [
-        p if isinstance(p, torch.Tensor) else torch.tensor(p, device=device, dtype=dtype)
-        for p in params
+        torch.as_tensor(p, device=device, dtype=dtype) for p in params
     ]
 
     def fire_init(
