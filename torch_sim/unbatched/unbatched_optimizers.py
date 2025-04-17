@@ -648,7 +648,7 @@ def unit_cell_fire(  # noqa: PLR0915, C901
 
         # Calculate virial
         volume = torch.linalg.det(state.cell).view(1, 1)
-        virial = -volume * stress + pressure
+        virial = -volume * (stress + pressure)
 
         if hydrostatic_strain:
             diag_mean = torch.diagonal(virial).mean().view(1, 1)
@@ -657,9 +657,6 @@ def unit_cell_fire(  # noqa: PLR0915, C901
         if constant_volume:
             diag_mean = torch.diagonal(virial).mean().view(1, 1)
             virial = virial - diag_mean * torch.eye(3, device=device)
-
-        virial = virial / cell_factor
-        cell_forces = virial
 
         # Create cell masses
         cell_masses = torch.full((3,), state.masses.sum(), device=device, dtype=dtype)
@@ -684,7 +681,7 @@ def unit_cell_fire(  # noqa: PLR0915, C901
             atomic_numbers=atomic_numbers,
             cell_positions=cell_positions,
             cell_velocities=torch.zeros_like(cell_positions),
-            cell_forces=cell_forces,
+            cell_forces=virial / cell_factor,
             cell_masses=cell_masses,
         )
 
@@ -742,7 +739,7 @@ def unit_cell_fire(  # noqa: PLR0915, C901
 
         # Calculate virial for cell forces
         volume = torch.linalg.det(new_row_vector_cell).view(1, 1)
-        virial = -volume * stress + state.pressure
+        virial = -volume * (stress + state.pressure)
 
         if state.hydrostatic_strain:
             diag_mean = torch.diagonal(virial).mean().view(1, 1)
@@ -752,8 +749,7 @@ def unit_cell_fire(  # noqa: PLR0915, C901
             diag_mean = torch.diagonal(virial).mean().view(1, 1)
             virial = virial - diag_mean * torch.eye(3, device=device)
 
-        virial = virial / state.cell_factor
-        state.cell_forces = virial
+        state.cell_forces = virial / state.cell_factor
 
         # Velocity Verlet second half step
         state.velocities += 0.5 * state.dt * state.forces / state.masses.unsqueeze(-1)
@@ -964,7 +960,7 @@ def frechet_cell_fire(  # noqa: PLR0915, C901
 
         # Calculate virial
         volume = torch.linalg.det(state.cell).view(1, 1)
-        virial = -volume * stress + pressure
+        virial = -volume * (stress + pressure)
 
         if hydrostatic_strain:
             diag_mean = torch.diagonal(virial).mean().view(1, 1)
@@ -1060,7 +1056,7 @@ def frechet_cell_fire(  # noqa: PLR0915, C901
 
         # Calculate virial for cell forces
         volume = torch.linalg.det(state.cell).view(1, 1)
-        virial = -volume * stress + state.pressure
+        virial = -volume * (stress + state.pressure)
 
         if state.hydrostatic_strain:
             diag_mean = torch.diagonal(virial).mean().view(1, 1)
