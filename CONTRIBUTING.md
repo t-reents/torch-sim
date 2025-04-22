@@ -13,6 +13,7 @@ Our CLA-bot will automatically verify your signature on pull requests. For quest
 ## Code Reviews
 
 All submissions require review by project maintainers before merging:
+
 - Submit changes via GitHub pull requests
 - Maintainers' submissions also require review by other maintainers
 - Address any feedback or requested changes promptly

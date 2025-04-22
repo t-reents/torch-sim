@@ -60,7 +60,7 @@ This folder contains a series of examples demonstrating the use of TorchSim, a l
 
    1. **Workflow** - [`examples/5_Workflow/5.1_a2c_silicon.py`](5_Workflow/5.1_a2c_silicon.py): Run the a2c workflow with the MACE model.
 
-    1. **Workflow** - [`examples/5_Workflow/5.4_Elastic.py`](5_Workflow/5.4_Elastic.py): Calculate elastic tensor, bulk modulus and shear modulus with MACE.
+   1. **Workflow** - [`examples/5_Workflow/5.4_Elastic.py`](5_Workflow/5.4_Elastic.py): Calculate elastic tensor, bulk modulus and shear modulus with MACE.
 
 1. **Phonons**
 

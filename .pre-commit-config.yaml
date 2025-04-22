@@ -34,10 +34,14 @@ repos:
     hooks:
       - id: codespell
         stages: [pre-commit, commit-msg]
-        args: [--ignore-words-list, "statics,crate,annote,atomate,nd,te,titel,coo,slite,fro"]
+        args: [--ignore-words-list, "statics,atomate,nd,te,titel,coo,slite,fro"]
 
   - repo: https://github.com/igorshubovych/markdownlint-cli
     rev: v0.44.0
     hooks:
       - id: markdownlint
-        exclude: \.md$
+        # MD013: line length
+        # MD033: no inline HTML
+        # MD041: first line in a file should be a top-level heading
+        # MD034: bare URL used
+        args: [--disable, MD013, MD033, MD041, MD034, "--"]
