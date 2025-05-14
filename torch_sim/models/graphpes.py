@@ -13,8 +13,11 @@ Notes:
     It supports various model configurations through model instances or model paths.
 """
 
+import traceback
 import typing
+import warnings
 from pathlib import Path
+from typing import Any
 
 import torch
 
@@ -29,7 +32,8 @@ try:
     from graph_pes.atomic_graph import PropertyKey, to_batch
     from graph_pes.models import load_model
 
-except ImportError:
+except ImportError as exc:
+    warnings.warn(f"GraphPES import failed: {traceback.format_exc()}", stacklevel=2)
     PropertyKey = str
 
     class GraphPESWrapper(torch.nn.Module, ModelInterface):  # type: ignore[reportRedeclaration]
@@ -39,11 +43,12 @@ except ImportError:
         It raises an ImportError if graph_pes is not installed.
         """
 
-        def __init__(self, *_args: typing.Any, **_kwargs: typing.Any) -> None:  # noqa: D107
-            raise ImportError("graph_pes must be installed to use this model.")
+        def __init__(self, err: ImportError = exc, *_args: Any, **_kwargs: Any) -> None:
+            """Dummy init for type checking."""
+            raise err
 
     class AtomicGraph:  # type: ignore[reportRedeclaration]  # noqa: D101
-        def __init__(self, *args: typing.Any, **kwargs: typing.Any) -> None:  # noqa: D107,ARG002
+        def __init__(self, *args: Any, **kwargs: Any) -> None:  # noqa: D107,ARG002
             raise ImportError("graph_pes must be installed to use this model.")
 
     class GraphPESModel(torch.nn.Module):  # type: ignore[reportRedeclaration]  # noqa: D101

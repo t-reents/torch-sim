@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import traceback
+import warnings
+from typing import TYPE_CHECKING, Any
 
 import torch
 
@@ -16,7 +18,8 @@ try:
     from mattersim.forcefield.potential import batch_to_dict
     from torch_geometric.loader.dataloader import Collater
 
-except ImportError:
+except ImportError as exc:
+    warnings.warn(f"MatterSim import failed: {traceback.format_exc()}", stacklevel=2)
 
     class MatterSimModel(torch.nn.Module, ModelInterface):
         """MatterSim model wrapper for torch_sim.
@@ -25,9 +28,9 @@ except ImportError:
         It raises an ImportError if sevenn is not installed.
         """
 
-        def __init__(self, *args, **kwargs) -> None:  # noqa: ARG002
-            """Dummy constructor to raise ImportError."""
-            raise ImportError("sevenn must be installed to use this model.")
+        def __init__(self, err: ImportError = exc, *_args: Any, **_kwargs: Any) -> None:
+            """Dummy init for type checking."""
+            raise err
 
 
 if TYPE_CHECKING:
