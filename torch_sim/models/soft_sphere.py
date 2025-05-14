@@ -44,10 +44,10 @@ Example::
 
 import torch
 
+from torch_sim import transforms
 from torch_sim.models.interface import ModelInterface
 from torch_sim.neighbors import vesin_nl_ts
 from torch_sim.state import SimState
-from torch_sim.transforms import get_pair_displacements
 from torch_sim.typing import StateDict
 from torch_sim.unbatched.models.soft_sphere import (
     soft_sphere_pair,
@@ -196,7 +196,7 @@ class SoftSphereModel(torch.nn.Module, ModelInterface):
                 positions, cell vectors, and other system information.
 
         Returns:
-            dict[str, torch.Tensor]: Dictionary of computed properties:
+            dict[str, torch.Tensor]: Computed properties:
                 - "energy": Total potential energy (scalar)
                 - "forces": Atomic forces with shape [n_atoms, 3] (if
                     compute_forces=True)
@@ -229,7 +229,7 @@ class SoftSphereModel(torch.nn.Module, ModelInterface):
                 sort_id=False,
             )
             # Get displacements between neighbor pairs
-            dr_vec, distances = get_pair_displacements(
+            dr_vec, distances = transforms.get_pair_displacements(
                 positions=positions,
                 cell=cell,
                 pbc=pbc,
@@ -239,7 +239,7 @@ class SoftSphereModel(torch.nn.Module, ModelInterface):
 
         else:
             # Direct N^2 computation of all pairs
-            dr_vec, distances = get_pair_displacements(
+            dr_vec, distances = transforms.get_pair_displacements(
                 positions=positions,
                 cell=cell,
                 pbc=pbc,
@@ -321,7 +321,7 @@ class SoftSphereModel(torch.nn.Module, ModelInterface):
                 or a dictionary with the same keys.
 
         Returns:
-            dict[str, torch.Tensor]: Dictionary of computed properties:
+            dict[str, torch.Tensor]: Computed properties:
                 - "energy": Potential energy with shape [n_batches]
                 - "forces": Atomic forces with shape [n_atoms, 3]
                     (if compute_forces=True)
@@ -602,7 +602,7 @@ class SoftSphereMultiModel(torch.nn.Module):
                 uses the species defined at initialization. Defaults to None.
 
         Returns:
-            dict[str, torch.Tensor]: Dictionary of computed properties:
+            dict[str, torch.Tensor]: Computed properties:
                 - "energy": Total potential energy (scalar)
                 - "forces": Atomic forces with shape [n_atoms, 3]
                     (if compute_forces=True)
@@ -644,7 +644,7 @@ class SoftSphereMultiModel(torch.nn.Module):
                 sorti=False,
             )
             # Get displacements between neighbor pairs
-            dr_vec, distances = get_pair_displacements(
+            dr_vec, distances = transforms.get_pair_displacements(
                 positions=positions,
                 cell=cell,
                 pbc=self.pbc,
@@ -654,7 +654,7 @@ class SoftSphereMultiModel(torch.nn.Module):
 
         else:
             # Direct N^2 computation of all pairs
-            dr_vec, distances = get_pair_displacements(
+            dr_vec, distances = transforms.get_pair_displacements(
                 positions=positions,
                 cell=cell,
                 pbc=self.pbc,
@@ -745,7 +745,7 @@ class SoftSphereMultiModel(torch.nn.Module):
                 or a dictionary with the same keys.
 
         Returns:
-            dict[str, torch.Tensor]: Dictionary of computed properties:
+            dict[str, torch.Tensor]: Computed properties:
                 - "energy": Potential energy with shape [n_batches]
                 - "forces": Atomic forces with shape [n_atoms, 3]
                     (if compute_forces=True)
