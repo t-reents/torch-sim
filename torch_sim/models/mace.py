@@ -19,13 +19,14 @@ Notes:
 
 import typing
 from collections.abc import Callable
+from enum import StrEnum
 from pathlib import Path
 
 import torch
 
+import torch_sim as ts
 from torch_sim.models.interface import ModelInterface
 from torch_sim.neighbors import vesin_nl_ts
-from torch_sim.state import SimState
 from torch_sim.typing import StateDict
 
 
@@ -233,7 +234,7 @@ class MaceModel(torch.nn.Module, ModelInterface):
 
     def forward(  # noqa: C901
         self,
-        state: SimState | StateDict,
+        state: ts.SimState | StateDict,
     ) -> dict[str, torch.Tensor]:
         """Compute energies, forces, and stresses for the given atomic systems.
 
@@ -260,7 +261,7 @@ class MaceModel(torch.nn.Module, ModelInterface):
         """
         # Extract required data from input
         if isinstance(state, dict):
-            state = SimState(**state, masses=torch.ones_like(state["positions"]))
+            state = ts.SimState(**state, masses=torch.ones_like(state["positions"]))
 
         # Handle input validation for atomic numbers
         if state.atomic_numbers is None and not self.atomic_numbers_in_init:
@@ -361,3 +362,11 @@ class MaceModel(torch.nn.Module, ModelInterface):
                 results["stress"] = stress.detach()
 
         return results
+
+
+class MaceUrls(StrEnum):
+    """Checkpoint download URLs for MACE models."""
+
+    mace_mp_small = "https://github.com/ACEsuit/mace-mp/releases/download/mace_mp_0b/mace_agnesi_small.model"
+    mace_mpa_medium = "https://github.com/ACEsuit/mace-foundations/releases/download/mace_mpa_0/mace-mpa-0-medium.model"
+    mace_off_small = "https://github.com/ACEsuit/mace-off/blob/main/mace_off23/MACE-OFF23_small.model?raw=true"
