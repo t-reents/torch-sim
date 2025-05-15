@@ -36,25 +36,26 @@ loaded_model = mace_mp(
 )
 
 # Number of steps to run
-N_steps = 10 if os.getenv("CI") else 500
+max_iterations = 10 if os.getenv("CI") else 500
+supercell_scale = (1, 1, 1) if os.getenv("CI") else (3, 2, 2)
 
 # Set random seed for reproducibility
 rng = np.random.default_rng(seed=0)
 
 # Create diamond cubic Silicon
-si_dc = bulk("Si", "diamond", a=5.21, cubic=True).repeat((4, 4, 4))
-si_dc.positions += 0.3 * rng.standard_normal(si_dc.positions.shape)
+si_dc = bulk("Si", "diamond", a=5.21, cubic=True).repeat(supercell_scale)
+si_dc.positions += 0.1 * rng.standard_normal(si_dc.positions.shape).clip(-1, 1)
 
 # Create FCC Copper
-cu_dc = bulk("Cu", "fcc", a=3.85).repeat((5, 5, 5))
-cu_dc.positions += 0.3 * rng.standard_normal(cu_dc.positions.shape)
+cu_dc = bulk("Cu", "fcc", a=3.85).repeat([r + 1 for r in supercell_scale])
+cu_dc.positions += 0.1 * rng.standard_normal(cu_dc.positions.shape).clip(-1, 1)
 
 # Create BCC Iron
-fe_dc = bulk("Fe", "bcc", a=2.95).repeat((5, 5, 5))
-fe_dc.positions += 0.3 * rng.standard_normal(fe_dc.positions.shape)
+fe_dc = bulk("Fe", "bcc", a=2.95).repeat([r + 1 for r in supercell_scale])
+fe_dc.positions += 0.1 * rng.standard_normal(fe_dc.positions.shape).clip(-1, 1)
 
 si_dc_vac = si_dc.copy()
-si_dc_vac.positions += 0.3 * rng.standard_normal(si_dc_vac.positions.shape)
+si_dc_vac.positions += 0.1 * rng.standard_normal(si_dc_vac.positions.shape).clip(-1, 1)
 # select 2 numbers in range 0 to len(si_dc_vac)
 indices = rng.choice(len(si_dc_vac), size=2, replace=False)
 for idx in indices:
@@ -62,7 +63,7 @@ for idx in indices:
 
 
 cu_dc_vac = cu_dc.copy()
-cu_dc_vac.positions += 0.3 * rng.standard_normal(cu_dc_vac.positions.shape)
+cu_dc_vac.positions += 0.1 * rng.standard_normal(cu_dc_vac.positions.shape).clip(-1, 1)
 # remove 2 atoms from cu_dc_vac at random
 indices = rng.choice(len(cu_dc_vac), size=2, replace=False)
 for idx in indices:
@@ -74,7 +75,7 @@ for idx in indices:
         cu_dc_vac.pop(0)
 
 fe_dc_vac = fe_dc.copy()
-fe_dc_vac.positions += 0.3 * rng.standard_normal(fe_dc_vac.positions.shape)
+fe_dc_vac.positions += 0.1 * rng.standard_normal(fe_dc_vac.positions.shape).clip(-1, 1)
 # remove 2 atoms from fe_dc_vac at random
 indices = rng.choice(len(fe_dc_vac), size=2, replace=False)
 for idx in indices:
@@ -129,7 +130,7 @@ def run_optimization(
         model=model,
         memory_scales_with="n_atoms",
         max_memory_scaler=1000,
-        max_iterations=1000,  # Increased max iterations
+        max_iterations=max_iterations,  # Increased max iterations
         return_indices=True,  # Ensure indices are returned
     )
 
@@ -237,9 +238,9 @@ print(f"{force_tol=:.2f} eV/Å")
 ase_final_states_list = ase_final_state.split()
 vv_final_states_list = vv_final_state.split()
 mean_displacements = []
-for idx in range(len(ase_final_states_list)):
-    ase_pos = ase_final_states_list[idx].positions
-    vv_pos = vv_final_states_list[idx].positions
+for ase_state, vv_state in zip(ase_final_states_list, vv_final_states_list, strict=True):
+    ase_pos = ase_state.positions - ase_state.positions.mean(dim=0)
+    vv_pos = vv_state.positions - vv_state.positions.mean(dim=0)
     displacement = torch.norm(ase_pos - vv_pos, dim=1)
     mean_disp = torch.mean(displacement).item()
     mean_displacements.append(mean_disp)

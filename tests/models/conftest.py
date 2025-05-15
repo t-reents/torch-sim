@@ -5,6 +5,7 @@ import pytest
 import torch
 
 import torch_sim as ts
+from torch_sim.elastic import full_3x3_to_voigt_6_stress
 
 
 if typing.TYPE_CHECKING:
@@ -36,8 +37,12 @@ def make_model_calculator_consistency_test(
     model_fixture_name: str,
     calculator_fixture_name: str,
     sim_state_names: tuple[str, ...],
-    rtol: float = 1e-5,
-    atol: float = 1e-5,
+    energy_rtol: float = 1e-5,
+    energy_atol: float = 1e-5,
+    force_rtol: float = 1e-5,
+    force_atol: float = 1e-5,
+    stress_rtol: float = 1e-5,
+    stress_atol: float = 1e-5,
 ):
     """Factory function to create model-calculator consistency tests.
 
@@ -46,8 +51,12 @@ def make_model_calculator_consistency_test(
         model_fixture_name: Name of the model fixture
         calculator_fixture_name: Name of the calculator fixture
         sim_state_names: sim_state fixture names to test
-        rtol: Relative tolerance for numerical comparisons
-        atol: Absolute tolerance for numerical comparisons
+        energy_rtol: Relative tolerance for energy comparisons
+        energy_atol: Absolute tolerance for energy comparisons
+        force_rtol: Relative tolerance for force comparisons
+        force_atol: Absolute tolerance for force comparisons
+        stress_rtol: Relative tolerance for stress comparisons
+        stress_atol: Absolute tolerance for stress comparisons
     """
 
     @pytest.mark.parametrize("sim_state_name", sim_state_names)
@@ -83,15 +92,30 @@ def make_model_calculator_consistency_test(
         torch.testing.assert_close(
             model_results["energy"].item(),
             atoms.get_potential_energy(),
-            rtol=rtol,
-            atol=atol,
+            rtol=energy_rtol,
+            atol=energy_atol,
         )
         torch.testing.assert_close(
             model_results["forces"],
             calc_forces,
-            rtol=rtol,
-            atol=atol,
+            rtol=force_rtol,
+            atol=force_atol,
         )
+
+        if "stress" in model_results:
+            calc_stress = torch.tensor(
+                atoms.get_stress(),
+                device=device,
+                dtype=model_results["stress"].dtype,
+            ).unsqueeze(0)
+
+            torch.testing.assert_close(
+                full_3x3_to_voigt_6_stress(model_results["stress"]),
+                calc_stress,
+                rtol=stress_rtol,
+                atol=stress_atol,
+                equal_nan=True,
+            )
 
     # Rename the function to include the test name
     test_model_calculator_consistency.__name__ = f"test_{test_name}_consistency"

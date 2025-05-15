@@ -35,7 +35,9 @@ jobs:
         uses: astral-sh/setup-uv@v6
 
       - name: Install torch_sim
-        run: uv pip install -e .[test] --resolution=${{ matrix.version.resolution }} --system
+        run: |
+          uv pip install "torch>2" --index-url https://download.pytorch.org/whl/cpu --system
+          uv pip install -e .[test] --resolution=${{ matrix.version.resolution }} --system
 
       - name: Run core tests
         run: |
@@ -118,7 +120,8 @@ jobs:
 
       - name: Install torch_sim with model dependencies
         if: ${{ matrix.model.name != 'fairchem' }}
-        run: uv pip install -e .[test,${{ matrix.model.name }}] --resolution=${{ matrix.version.resolution }} --system
+        run: |
+          uv pip install -e .[test,${{ matrix.model.name }}] --resolution=${{ matrix.version.resolution }} --system
 
       - name: Run ${{ matrix.model.test_path }} tests
         run: |
