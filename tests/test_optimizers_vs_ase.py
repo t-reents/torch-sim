@@ -1,126 +1,229 @@
 import copy
-import functools
+from typing import TYPE_CHECKING, Any
 
 import pytest
 import torch
-from ase.filters import FrechetCellFilter
+from ase.filters import FrechetCellFilter, UnitCellFilter
 from ase.optimize import FIRE
 
 import torch_sim as ts
 from torch_sim.io import state_to_atoms
 from torch_sim.models.mace import MaceModel
-from torch_sim.optimizers import frechet_cell_fire
+from torch_sim.optimizers import frechet_cell_fire, unit_cell_fire
 
 
-try:
+if TYPE_CHECKING:
     from mace.calculators import MACECalculator
-except ImportError:
-    MACECalculator = None
 
 
-@pytest.mark.skipif(MACECalculator is None, reason="MACECalculator not installed")
-def test_torchsim_frechet_cell_fire_vs_ase_mace(
-    rattled_sio2_sim_state: ts.state.SimState,
+def _run_and_compare_optimizers(
+    initial_sim_state_fixture: ts.state.SimState,
     torchsim_mace_mpa: MaceModel,
-    ase_mace_mpa: MACECalculator,
+    ase_mace_mpa: "MACECalculator",
+    torch_sim_optimizer_type: str,
+    ase_filter_class: Any,
+    checkpoints: list[int],
+    force_tol: float,
+    tolerances: dict[str, float],
+    test_id_prefix: str,
 ) -> None:
-    """Compare torch-sim's Frechet Cell FIRE optimizer with ASE's FIRE + FrechetCellFilter
-    using MACE-MPA-0.
-
-    This test ensures that the custom Frechet Cell FIRE implementation behaves comparably
-    to the established ASE equivalent when using a MACE force field.
-    It checks for consistency in final energies, forces, positions, and cell parameters.
-    """
-    # Use float64 for consistency with the MACE model fixture and for precision
+    """Run and compare optimizations between torch-sim and ASE."""
+    pytest.importorskip("mace")
     dtype = torch.float64
-    device = torchsim_mace_mpa.device  # Use device from the model
+    device = torchsim_mace_mpa.device
 
-    # --- Setup Initial State with float64 ---
-    # Deepcopy to avoid modifying the fixture state for other tests
-    initial_state = copy.deepcopy(rattled_sio2_sim_state).to(dtype=dtype, device=device)
-
-    # Ensure grads are enabled for both positions and cell for optimization
-    initial_state.positions = initial_state.positions.detach().requires_grad_(
-        requires_grad=True
+    ts_current_system_state = copy.deepcopy(initial_sim_state_fixture).to(
+        dtype=dtype, device=device
     )
-    initial_state.cell = initial_state.cell.detach().requires_grad_(requires_grad=True)
+    ts_current_system_state.positions = (
+        ts_current_system_state.positions.detach().requires_grad_()
+    )
+    ts_current_system_state.cell = ts_current_system_state.cell.detach().requires_grad_()
+    ts_optimizer_state = None
 
-    n_steps = 20  # Number of optimization steps
-    force_tol = 0.02  # Convergence criterion for forces
+    optimizer_builders = {
+        "frechet": frechet_cell_fire,
+        "unit_cell": unit_cell_fire,
+    }
+    if torch_sim_optimizer_type not in optimizer_builders:
+        raise ValueError(f"Unknown torch_sim_optimizer_type: {torch_sim_optimizer_type}")
+    ts_optimizer_builder = optimizer_builders[torch_sim_optimizer_type]
 
-    # --- Run torch-sim Frechet Cell FIRE with MACE model ---
-    # Use functools.partial to set md_flavor for the frechet_cell_fire optimizer
-    torch_sim_optimizer = functools.partial(frechet_cell_fire, md_flavor="ase_fire")
-
-    custom_opt_state = ts.optimize(
-        system=initial_state,
-        model=torchsim_mace_mpa,
-        optimizer=torch_sim_optimizer,
-        max_steps=n_steps,
-        convergence_fn=ts.generate_force_convergence_fn(force_tol=force_tol),
+    optimizer_callable_for_ts_optimize = lambda model, **_kwargs: ts_optimizer_builder(  # noqa: E731
+        model, md_flavor="ase_fire"
     )
 
-    # --- Setup ASE System with native MACE calculator ---
-    # Convert initial SimState to ASE Atoms object
-    ase_atoms = state_to_atoms(initial_state)[0]  # state_to_atoms returns a list
-    ase_atoms.calc = ase_mace_mpa  # Assign the MACE calculator
+    ase_atoms_for_run = state_to_atoms(
+        copy.deepcopy(initial_sim_state_fixture).to(dtype=dtype, device=device)
+    )[0]
+    ase_atoms_for_run.calc = ase_mace_mpa
+    filtered_ase_atoms_for_run = ase_filter_class(ase_atoms_for_run)
+    ase_optimizer = FIRE(filtered_ase_atoms_for_run, logfile=None)
 
-    # --- Run ASE FIRE with FrechetCellFilter ---
-    # Apply FrechetCellFilter for cell optimization
-    filtered_ase_atoms = FrechetCellFilter(ase_atoms)
-    ase_optimizer = FIRE(filtered_ase_atoms)
+    last_checkpoint_step_count = 0
+    convergence_fn = ts.generate_force_convergence_fn(force_tol=force_tol)
 
-    # Run ASE optimization
-    ase_optimizer.run(fmax=force_tol, steps=n_steps)
+    for checkpoint_step in checkpoints:
+        steps_for_current_segment = checkpoint_step - last_checkpoint_step_count
 
-    # --- Compare Results ---
-    final_custom_energy = custom_opt_state.energy.item()
-    final_custom_forces_max = torch.norm(custom_opt_state.forces, dim=-1).max().item()
-    final_custom_positions = custom_opt_state.positions.detach()
-    # Ensure cell is in row vector format and squeezed for comparison
-    final_custom_cell = custom_opt_state.row_vector_cell.squeeze(0).detach()
+        if steps_for_current_segment > 0:
+            # Ensure requires_grad is set for the input to ts.optimize
+            # ts.optimize is expected to return a state suitable for further optimization
+            # if optimizer_state is passed.
+            ts_current_system_state.positions = (
+                ts_current_system_state.positions.detach().requires_grad_()
+            )
+            ts_current_system_state.cell = (
+                ts_current_system_state.cell.detach().requires_grad_()
+            )
+            new_ts_state_and_optimizer_state = ts.optimize(
+                system=ts_current_system_state,
+                model=torchsim_mace_mpa,
+                optimizer=optimizer_callable_for_ts_optimize,
+                max_steps=steps_for_current_segment,
+                convergence_fn=convergence_fn,
+                optimizer_state=ts_optimizer_state,
+            )
+            ts_current_system_state = new_ts_state_and_optimizer_state
+            ts_optimizer_state = new_ts_state_and_optimizer_state
 
-    final_ase_energy = ase_atoms.get_potential_energy()
-    ase_forces_raw = ase_atoms.get_forces()
-    if ase_forces_raw is not None:
-        final_ase_forces = torch.tensor(ase_forces_raw, device=device, dtype=dtype)
-        final_ase_forces_max = torch.norm(final_ase_forces, dim=-1).max().item()
-    else:
-        # Should not happen if calculator ran and produced forces
-        final_ase_forces_max = float("nan")
+            ase_optimizer.run(fmax=force_tol, steps=steps_for_current_segment)
 
-    final_ase_positions = torch.tensor(
-        ase_atoms.get_positions(), device=device, dtype=dtype
-    )
-    final_ase_cell = torch.tensor(ase_atoms.get_cell(), device=device, dtype=dtype)
+        current_test_id = f"{test_id_prefix} (Step {checkpoint_step})"
 
-    # Compare energies (looser tolerance for ML potentials due to potential minor
-    # numerical differences)
-    energy_diff = abs(final_custom_energy - final_ase_energy)
-    assert energy_diff < 5e-2, (
-        f"Final energies differ significantly after {n_steps} steps: "
-        f"torch-sim={final_custom_energy:.6f}, ASE={final_ase_energy:.6f}, "
-        f"Diff={energy_diff:.2e}"
-    )
+        final_custom_energy = ts_current_system_state.energy.item()
+        final_custom_forces_max = (
+            torch.norm(ts_current_system_state.forces, dim=-1).max().item()
+        )
+        final_custom_positions = ts_current_system_state.positions.detach()
+        final_custom_cell = ts_current_system_state.row_vector_cell.squeeze(0).detach()
 
-    # Report forces for diagnostics
-    print(
-        f"Max Force ({n_steps} steps): torch-sim={final_custom_forces_max:.4f}, "
-        f"ASE={final_ase_forces_max:.4f}"
-    )
+        final_ase_atoms = filtered_ase_atoms_for_run.atoms
+        final_ase_energy = final_ase_atoms.get_potential_energy()
+        ase_forces_raw = final_ase_atoms.get_forces()
+        final_ase_forces_max = torch.norm(
+            torch.tensor(ase_forces_raw, device=device, dtype=dtype), dim=-1
+        ).max()
+        final_ase_positions = torch.tensor(
+            final_ase_atoms.get_positions(), device=device, dtype=dtype
+        )
+        final_ase_cell = torch.tensor(
+            final_ase_atoms.get_cell(), device=device, dtype=dtype
+        )
 
-    # Compare positions (average displacement, looser tolerance)
-    avg_displacement = (
-        torch.norm(final_custom_positions - final_ase_positions, dim=-1).mean().item()
-    )
-    assert avg_displacement < 1.0, (
-        f"Final positions differ significantly (avg displacement: {avg_displacement:.4f})"
-    )
+        energy_diff = abs(final_custom_energy - final_ase_energy)
+        assert energy_diff < tolerances["energy"], (
+            f"{current_test_id}: Final energies differ significantly: "
+            f"torch-sim={final_custom_energy:.6f}, ASE={final_ase_energy:.6f}, "
+            f"Diff={energy_diff:.2e}"
+        )
 
-    # Compare cell matrices (Frobenius norm, looser tolerance)
-    cell_diff = torch.norm(final_custom_cell - final_ase_cell).item()
-    assert cell_diff < 1.0, (
-        f"Final cell matrices differ significantly (Frobenius norm: {cell_diff:.4f})"
-        f"\nTorch-sim Cell:\n{final_custom_cell}"
-        f"\nASE Cell:\n{final_ase_cell}"
+        avg_displacement = (
+            torch.norm(final_custom_positions - final_ase_positions, dim=-1).mean().item()
+        )
+        assert avg_displacement < tolerances["pos"], (
+            f"{current_test_id}: Final positions differ ({avg_displacement=:.4f})"
+        )
+
+        cell_diff = torch.norm(final_custom_cell - final_ase_cell).item()
+        assert cell_diff < tolerances["cell"], (
+            f"{current_test_id}: Final cell matrices differ (Frobenius norm: "
+            f"{cell_diff:.4f})\nTorch-sim Cell:\n{final_custom_cell}"
+            f"\nASE Cell:\n{final_ase_cell}"
+        )
+
+        force_max_diff = abs(final_custom_forces_max - final_ase_forces_max)
+        assert force_max_diff < tolerances["force_max"], (
+            f"{current_test_id}: Max forces differ significantly: "
+            f"torch-sim={final_custom_forces_max:.4f}, ASE={final_ase_forces_max:.4f}, "
+            f"Diff={force_max_diff:.2e}"
+        )
+
+        last_checkpoint_step_count = checkpoint_step
+
+
+@pytest.mark.parametrize(
+    (
+        "sim_state_fixture_name",
+        "torch_sim_optimizer_type",
+        "ase_filter_class",
+        "checkpoints",
+        "force_tol",
+        "tolerances",
+        "test_id_prefix",
+    ),
+    [
+        (
+            "rattled_sio2_sim_state",
+            "frechet",
+            FrechetCellFilter,
+            [33, 66, 100],
+            0.02,
+            {"energy": 1e-2, "pos": 1.5e-2, "cell": 1.8e-2, "force_max": 1.5e-1},
+            "SiO2 (Frechet)",
+        ),
+        (
+            "osn2_sim_state",
+            "frechet",
+            FrechetCellFilter,
+            [16, 33, 50],
+            0.02,
+            {"energy": 1e-4, "pos": 1e-3, "cell": 1.8e-3, "force_max": 5e-2},
+            "OsN2 (Frechet)",
+        ),
+        (
+            "distorted_fcc_al_conventional_sim_state",
+            "frechet",
+            FrechetCellFilter,
+            [33, 66, 100],
+            0.01,
+            {"energy": 1e-2, "pos": 5e-3, "cell": 2e-2, "force_max": 5e-2},
+            "Triclinic Al (Frechet)",
+        ),
+        (
+            "distorted_fcc_al_conventional_sim_state",
+            "unit_cell",
+            UnitCellFilter,
+            [33, 66, 100],
+            0.01,
+            {"energy": 1e-2, "pos": 3e-2, "cell": 1e-1, "force_max": 5e-2},
+            "Triclinic Al (UnitCell)",
+        ),
+        (
+            "rattled_sio2_sim_state",
+            "unit_cell",
+            UnitCellFilter,
+            [33, 66, 100],
+            0.02,
+            {"energy": 1.5e-2, "pos": 2.5e-2, "cell": 5e-2, "force_max": 0.25},
+            "SiO2 (UnitCell)",
+        ),
+    ],
+)
+def test_optimizer_vs_ase_parametrized(
+    sim_state_fixture_name: str,
+    torch_sim_optimizer_type: str,
+    ase_filter_class: Any,
+    checkpoints: list[int],
+    force_tol: float,
+    tolerances: dict[str, float],
+    test_id_prefix: str,
+    torchsim_mace_mpa: MaceModel,
+    ase_mace_mpa: "MACECalculator",
+    request: pytest.FixtureRequest,
+) -> None:
+    """Compare torch-sim optimizers with ASE FIRE and relevant filters at multiple
+    checkpoints."""
+    initial_sim_state_fixture = request.getfixturevalue(sim_state_fixture_name)
+
+    _run_and_compare_optimizers(
+        initial_sim_state_fixture=initial_sim_state_fixture,
+        torchsim_mace_mpa=torchsim_mace_mpa,
+        ase_mace_mpa=ase_mace_mpa,
+        torch_sim_optimizer_type=torch_sim_optimizer_type,
+        ase_filter_class=ase_filter_class,
+        checkpoints=checkpoints,
+        force_tol=force_tol,
+        tolerances=tolerances,
+        test_id_prefix=test_id_prefix,
     )
