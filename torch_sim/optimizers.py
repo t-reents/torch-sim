@@ -1481,14 +1481,28 @@ def _ase_fire_step(  # noqa: C901, PLR0915
 
     # 3. Velocity mixing BEFORE acceleration (ASE ordering)
     # Atoms
-    v_norm_atom = torch.norm(state.velocities, dim=1, keepdim=True)
-    f_norm_atom = torch.norm(state.forces, dim=1, keepdim=True)
-    f_unit_atom = state.forces / (f_norm_atom + eps)
-    alpha_atom = state.alpha[state.batch].unsqueeze(-1)
-    pos_mask_atom = pos_mask_batch[state.batch].unsqueeze(-1)
-    v_new_atom = (
-        1.0 - alpha_atom
-    ) * state.velocities + alpha_atom * f_unit_atom * v_norm_atom
+    # print(f"{state.velocities.shape=}")
+    v_sum_sq_batch = tsm.batched_vdot(state.velocities, state.velocities, state.batch)
+    # sum_sq per batch, shape [n_batches]
+    f_sum_sq_batch = tsm.batched_vdot(state.forces, state.forces, state.batch)
+    # sum_sq per batch, shape [n_batches]
+
+    # Expand to per-atom for applying to vectors
+    # These are sqrt(sum ||v_i||^2)_batch and sqrt(sum ||f_i||^2)_batch
+    # Effectively |V|_batch and |F|_batch for the mixing formula
+    sqrt_v_sum_sq_batch_expanded = torch.sqrt(v_sum_sq_batch[state.batch].unsqueeze(-1))
+    sqrt_f_sum_sq_batch_expanded = torch.sqrt(f_sum_sq_batch[state.batch].unsqueeze(-1))
+
+    alpha_atom = state.alpha[state.batch].unsqueeze(-1)  # per-atom alpha
+    pos_mask_atom = pos_mask_batch[state.batch].unsqueeze(-1)  # per-atom mask
+
+    # ASE formula: v_new = (1-a)*v + a * (f / |F|_batch) * |V|_batch
+    #           = (1-a)*v + a * f * (|V|_batch / |F|_batch)
+    mixing_term_atom = state.forces * (
+        sqrt_v_sum_sq_batch_expanded / (sqrt_f_sum_sq_batch_expanded + eps)
+    )
+
+    v_new_atom = (1.0 - alpha_atom) * state.velocities + alpha_atom * mixing_term_atom
     state.velocities = torch.where(
         pos_mask_atom, v_new_atom, torch.zeros_like(state.velocities)
     )
@@ -1524,11 +1538,21 @@ def _ase_fire_step(  # noqa: C901, PLR0915
         dr_cell = cell_dt * state.cell_velocities
 
     # 6. Clamp to max_step
-    dr_norm_atom = torch.norm(dr_atom, dim=1, keepdim=True)
-    mask_atom_max_step = dr_norm_atom > max_step
-    dr_atom = torch.where(
-        mask_atom_max_step, max_step * dr_atom / (dr_norm_atom + eps), dr_atom
+    dr_atom_sum_sq_batch = tsm.batched_vdot(dr_atom, dr_atom, state.batch)
+    norm_dr_atom_per_batch = torch.sqrt(dr_atom_sum_sq_batch)  # shape [n_batches]
+
+    mask_clamp_batch = norm_dr_atom_per_batch > max_step  # shape [n_batches]
+
+    scaling_factor_batch = torch.ones_like(norm_dr_atom_per_batch)
+    safe_norm_for_clamped_batches = norm_dr_atom_per_batch[mask_clamp_batch]
+    scaling_factor_batch[mask_clamp_batch] = max_step / (
+        safe_norm_for_clamped_batches + eps
     )
+
+    # shape [N_atoms, 1]
+    atom_wise_scaling_factor = scaling_factor_batch[state.batch].unsqueeze(-1)
+
+    dr_atom = dr_atom * atom_wise_scaling_factor
 
     old_row_vector_cell: torch.Tensor | None = None
     if is_cell_optimization:
