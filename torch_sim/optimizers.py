@@ -1406,8 +1406,11 @@ def _vv_fire_step(  # noqa: C901, PLR0915
     return state
 
 
+VALID_FIRE_CELL_STATES = (UnitCellFireState, FrechetCellFIREState)
+
+
 def _ase_fire_step(  # noqa: C901, PLR0915
-    state: FireState | UnitCellFireState | FrechetCellFIREState,
+    state: FireState | VALID_FIRE_CELL_STATES,
     model: torch.nn.Module,
     *,
     dt_max: torch.Tensor,
@@ -1451,6 +1454,10 @@ def _ase_fire_step(  # noqa: C901, PLR0915
         state.velocities = torch.zeros_like(state.positions)
         forces = state.forces
         if is_cell_optimization:
+            if not isinstance(state, VALID_FIRE_CELL_STATES):
+                raise ValueError(
+                    "Cell optimization requires one of {VALID_FIRE_CELL_STATES}."
+                )
             state.cell_velocities = torch.zeros(
                 (n_batches, 3, 3), device=device, dtype=dtype
             )
@@ -1470,10 +1477,6 @@ def _ase_fire_step(  # noqa: C901, PLR0915
         batch_power = tsm.batched_vdot(forces, state.velocities, state.batch)
 
         if is_cell_optimization:
-            valid_states = (UnitCellFireState, FrechetCellFIREState)
-            assert isinstance(state, valid_states), (
-                f"Cell optimization requires one of {valid_states}."
-            )
             batch_power += (state.cell_forces * state.cell_velocities).sum(dim=(1, 2))
 
         # 2. Update dt, alpha, n_pos
@@ -1496,7 +1499,6 @@ def _ase_fire_step(  # noqa: C901, PLR0915
         f_scaling_batch = tsm.batched_vdot(state.forces, state.forces, state.batch)
 
         if is_cell_optimization:
-            assert isinstance(state, (UnitCellFireState, FrechetCellFIREState))
             v_scaling_batch += (
                 state.cell_velocities.pow(2).sum(dim=(1, 2), keepdim=True).squeeze(-1)
             )
@@ -1529,11 +1531,10 @@ def _ase_fire_step(  # noqa: C901, PLR0915
 
     # 4. Acceleration (single forward-Euler, no mass for ASE FIRE)
     state.velocities += state.forces * state.dt[state.batch].unsqueeze(-1)
-    dr_atom = state.forces * state.dt[state.batch].unsqueeze(-1)
+    dr_atom = state.velocities * state.dt[state.batch].unsqueeze(-1)
     dr_scaling_batch = tsm.batched_vdot(dr_atom, dr_atom, state.batch)
 
     if is_cell_optimization:
-        assert isinstance(state, (UnitCellFireState, FrechetCellFIREState))
         state.cell_velocities += state.cell_forces * state.dt.view(-1, 1, 1)
         dr_cell = state.cell_velocities * state.dt.view(-1, 1, 1)
 
@@ -1555,7 +1556,6 @@ def _ase_fire_step(  # noqa: C901, PLR0915
     state.positions = state.positions + dr_atom
 
     if is_cell_optimization:
-        assert isinstance(state, (UnitCellFireState, FrechetCellFIREState))
         if is_frechet:
             assert isinstance(state, FrechetCellFIREState)
             new_logm_F_scaled = state.cell_positions + dr_cell
@@ -1598,7 +1598,6 @@ def _ase_fire_step(  # noqa: C901, PLR0915
     state.energy = results["energy"]
 
     if is_cell_optimization:
-        assert isinstance(state, (UnitCellFireState, FrechetCellFIREState))
         state.stress = results["stress"]
         volumes = torch.linalg.det(state.cell).view(-1, 1, 1)
         if torch.any(volumes <= 0):
