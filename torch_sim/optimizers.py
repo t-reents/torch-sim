@@ -1410,7 +1410,7 @@ VALID_FIRE_CELL_STATES = (UnitCellFireState, FrechetCellFIREState)
 
 
 def _ase_fire_step(  # noqa: C901, PLR0915
-    state: FireState | VALID_FIRE_CELL_STATES,
+    state: FireState | UnitCellFireState | FrechetCellFIREState,
     model: torch.nn.Module,
     *,
     dt_max: torch.Tensor,
