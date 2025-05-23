@@ -1447,85 +1447,81 @@ def _ase_fire_step(  # noqa: C901, PLR0915
     device, dtype = state.positions.device, state.positions.dtype
     n_batches = state.n_batches
 
-    # Setup batch-wise alpha_start for potential reset
-    # alpha_start is a 0-dim tensor from the factory
-    alpha_start_batch = torch.full(
-        (n_batches,), alpha_start.item(), device=device, dtype=dtype
-    )
-
-    # 1. Current power (F·v) per batch (atoms + cell)
-    atomic_power = (state.forces * state.velocities).sum(dim=1)
-    batch_power = torch.zeros(n_batches, device=device, dtype=dtype)
-    batch_power.scatter_add_(0, state.batch, atomic_power)
-
-    if is_cell_optimization:
-        valid_states = (UnitCellFireState, FrechetCellFIREState)
-        assert isinstance(state, valid_states), (
-            f"Cell optimization requires one of {valid_states}."
+    if state.velocities is None:
+        state.velocities = torch.zeros_like(state.positions)
+        if is_cell_optimization:
+            state.cell_velocities = torch.zeros(
+                (n_batches, 3, 3), device=device, dtype=dtype
+            )
+    else:
+        alpha_start_batch = torch.full(
+            (n_batches,), alpha_start.item(), device=device, dtype=dtype
         )
-        cell_power = (state.cell_forces * state.cell_velocities).sum(dim=(1, 2))
-        batch_power += cell_power
 
-    # 2. Update dt, alpha, n_pos
-    pos_mask_batch = batch_power > 0.0
-    neg_mask_batch = ~pos_mask_batch
+        # 1. Current power (F·v) per batch (atoms + cell)
+        batch_power = tsm.batched_vdot(state.forces, state.velocities, state.batch)
 
-    state.n_pos[pos_mask_batch] += 1
-    inc_mask = (state.n_pos > n_min) & pos_mask_batch
-    state.dt[inc_mask] = torch.minimum(state.dt[inc_mask] * f_inc, dt_max)
-    state.alpha[inc_mask] *= f_alpha
+        if is_cell_optimization:
+            valid_states = (UnitCellFireState, FrechetCellFIREState)
+            assert isinstance(state, valid_states), (
+                f"Cell optimization requires one of {valid_states}."
+            )
+            batch_power += (state.cell_forces * state.cell_velocities).sum(dim=(1, 2))
 
-    state.dt[neg_mask_batch] *= f_dec
-    state.alpha[neg_mask_batch] = alpha_start_batch[neg_mask_batch]
-    state.n_pos[neg_mask_batch] = 0
+        # 2. Update dt, alpha, n_pos
+        pos_mask_batch = batch_power > 0.0
+        neg_mask_batch = ~pos_mask_batch
 
-    # 3. Velocity mixing BEFORE acceleration (ASE ordering)
-    # Atoms
-    # print(f"{state.velocities.shape=}")
-    v_sum_sq_batch = tsm.batched_vdot(state.velocities, state.velocities, state.batch)
-    # sum_sq per batch, shape [n_batches]
-    f_sum_sq_batch = tsm.batched_vdot(state.forces, state.forces, state.batch)
-    # sum_sq per batch, shape [n_batches]
+        state.n_pos[pos_mask_batch] += 1
+        inc_mask = (state.n_pos > n_min) & pos_mask_batch
+        state.dt[inc_mask] = torch.minimum(state.dt[inc_mask] * f_inc, dt_max)
+        state.alpha[inc_mask] *= f_alpha
 
-    # Expand to per-atom for applying to vectors
-    # These are sqrt(sum ||v_i||^2)_batch and sqrt(sum ||f_i||^2)_batch
-    # Effectively |V|_batch and |F|_batch for the mixing formula
-    sqrt_v_sum_sq_batch_expanded = torch.sqrt(v_sum_sq_batch[state.batch].unsqueeze(-1))
-    sqrt_f_sum_sq_batch_expanded = torch.sqrt(f_sum_sq_batch[state.batch].unsqueeze(-1))
+        state.dt[neg_mask_batch] *= f_dec
+        state.alpha[neg_mask_batch] = alpha_start_batch[neg_mask_batch]
+        state.n_pos[neg_mask_batch] = 0
 
-    alpha_atom = state.alpha[state.batch].unsqueeze(-1)  # per-atom alpha
-    pos_mask_atom = pos_mask_batch[state.batch].unsqueeze(-1)  # per-atom mask
+        # 3. Velocity mixing BEFORE acceleration (ASE ordering)
+        v_scaling_batch = tsm.batched_vdot(
+            state.velocities, state.velocities, state.batch
+        )
+        f_scaling_batch = tsm.batched_vdot(state.forces, state.forces, state.batch)
 
-    # ASE formula: v_new = (1-a)*v + a * (f / |F|_batch) * |V|_batch
-    #           = (1-a)*v + a * f * (|V|_batch / |F|_batch)
-    mixing_term_atom = state.forces * (
-        sqrt_v_sum_sq_batch_expanded / (sqrt_f_sum_sq_batch_expanded + eps)
-    )
+        if is_cell_optimization:
+            assert isinstance(state, (UnitCellFireState, FrechetCellFIREState))
+            v_scaling_batch += (
+                state.cell_velocities.pow(2).sum(dim=(1, 2), keepdim=True).squeeze(-1)
+            )
+            f_scaling_batch += (
+                state.cell_forces.pow(2).sum(dim=(1, 2), keepdim=True).squeeze(-1)
+            )
 
-    v_new_atom = (1.0 - alpha_atom) * state.velocities + alpha_atom * mixing_term_atom
-    state.velocities = torch.where(
-        pos_mask_atom, v_new_atom, torch.zeros_like(state.velocities)
-    )
+            v_scaling_cell = torch.sqrt(v_scaling_batch.view(n_batches, 1, 1))
+            f_scaling_cell = torch.sqrt(f_scaling_batch.view(n_batches, 1, 1))
+            v_mixing_cell = state.cell_forces / (f_scaling_cell + eps) * v_scaling_cell
 
-    if is_cell_optimization:
-        assert isinstance(state, (UnitCellFireState, FrechetCellFIREState))
-        # Cell velocity mixing
-        cv_norm = torch.norm(state.cell_velocities, dim=(1, 2), keepdim=True)
-        cf_norm = torch.norm(state.cell_forces, dim=(1, 2), keepdim=True)
-        cf_unit = state.cell_forces / (cf_norm + eps)
-        alpha_cell_bc = state.alpha.view(-1, 1, 1)
-        pos_mask_cell_bc = pos_mask_batch.view(-1, 1, 1)
-        v_new_cell = (
-            1.0 - alpha_cell_bc
-        ) * state.cell_velocities + alpha_cell_bc * cf_unit * cv_norm
-        state.cell_velocities = torch.where(
-            pos_mask_cell_bc, v_new_cell, torch.zeros_like(state.cell_velocities)
+            alpha_cell_bc = state.alpha.view(-1, 1, 1)
+            state.cell_velocities = torch.where(
+                pos_mask_batch.view(-1, 1, 1),
+                (1.0 - alpha_cell_bc) * state.cell_velocities
+                + alpha_cell_bc * v_mixing_cell,
+                torch.zeros_like(state.cell_velocities),
+            )
+
+        v_scaling_atom = torch.sqrt(v_scaling_batch[state.batch].unsqueeze(-1))
+        f_scaling_atom = torch.sqrt(f_scaling_batch[state.batch].unsqueeze(-1))
+        v_mixing_atom = state.forces * (v_scaling_atom / (f_scaling_atom + eps))
+
+        alpha_atom = state.alpha[state.batch].unsqueeze(-1)  # per-atom alpha
+        state.velocities = torch.where(
+            pos_mask_batch[state.batch].unsqueeze(-1),
+            (1.0 - alpha_atom) * state.velocities + alpha_atom * v_mixing_atom,
+            torch.zeros_like(state.velocities),
         )
 
     # 4. Acceleration (single forward-Euler, no mass for ASE FIRE)
     atom_dt = state.dt[state.batch].unsqueeze(-1)
     state.velocities += atom_dt * state.forces
-
     if is_cell_optimization:
         assert isinstance(state, (UnitCellFireState, FrechetCellFIREState))
         cell_dt = state.dt.view(-1, 1, 1)
@@ -1537,103 +1533,71 @@ def _ase_fire_step(  # noqa: C901, PLR0915
         assert isinstance(state, (UnitCellFireState, FrechetCellFIREState))
         dr_cell = cell_dt * state.cell_velocities
 
-    # 6. Clamp to max_step
-    dr_atom_sum_sq_batch = tsm.batched_vdot(dr_atom, dr_atom, state.batch)
-    norm_dr_atom_per_batch = torch.sqrt(dr_atom_sum_sq_batch)  # shape [n_batches]
-
-    mask_clamp_batch = norm_dr_atom_per_batch > max_step  # shape [n_batches]
-
-    scaling_factor_batch = torch.ones_like(norm_dr_atom_per_batch)
-    safe_norm_for_clamped_batches = norm_dr_atom_per_batch[mask_clamp_batch]
-    scaling_factor_batch[mask_clamp_batch] = max_step / (
-        safe_norm_for_clamped_batches + eps
-    )
-
-    # shape [N_atoms, 1]
-    atom_wise_scaling_factor = scaling_factor_batch[state.batch].unsqueeze(-1)
-
-    dr_atom = dr_atom * atom_wise_scaling_factor
+    # 6. Position / cell update
+    dr_scaling_batch = tsm.batched_vdot(dr_atom, dr_atom, state.batch)
 
     old_row_vector_cell: torch.Tensor | None = None
     if is_cell_optimization:
         assert isinstance(state, (UnitCellFireState, FrechetCellFIREState))
-        # Cell clamp to max_step (Frobenius norm)
-        dr_cell_norm_fro = torch.norm(dr_cell.view(n_batches, -1), dim=1, keepdim=True)
-        mask_cell_max_step = dr_cell_norm_fro.view(n_batches, 1, 1) > max_step
+        dr_scaling_batch += dr_cell.pow(2).sum(dim=(1, 2), keepdim=True).squeeze(-1)
+        dr_scaling_cell = torch.sqrt(dr_scaling_batch.view(n_batches, 1, 1))
         dr_cell = torch.where(
-            mask_cell_max_step,
-            max_step * dr_cell / (dr_cell_norm_fro.view(n_batches, 1, 1) + eps),
+            dr_scaling_cell > max_step,
+            max_step * dr_cell / (dr_scaling_cell + eps),
             dr_cell,
         )
 
-        # 7. Position / cell update
-        # Store old cell for scaling atoms
-        # Ensure old_row_vector_cell is cloned before any modification to state.cell or
-        # state.row_vector_cell
+        # save the old cell to allow rescaling of the positions after cell update
         old_row_vector_cell = state.row_vector_cell.clone()
 
+    dr_scaling_atom = torch.sqrt(dr_scaling_batch[state.batch])
+    dr_atom = torch.where(
+        dr_scaling_atom > max_step, max_step * dr_atom / (dr_scaling_atom + eps), dr_atom
+    )
     state.positions = state.positions + dr_atom
 
-    # F_new stores F_new for Frechet's ucf_cell_grad if needed
-    F_new: torch.Tensor | None = None
-    # logm_F_new stores logm_F_new for Frechet's cell_forces recalc if needed
-    logm_F_new: torch.Tensor | None = None
-
     if is_cell_optimization:
+        F_new: torch.Tensor | None = None
+        logm_F_new: torch.Tensor | None = None
+
         assert isinstance(state, (UnitCellFireState, FrechetCellFIREState))
         if is_frechet:
             assert isinstance(state, FrechetCellFIREState)
-            # Frechet cell update logic
             new_logm_F_scaled = state.cell_positions + dr_cell
             state.cell_positions = new_logm_F_scaled
-            # cell_factor is (N,1,1)
             logm_F_new = new_logm_F_scaled / (state.cell_factor + eps)
             F_new = torch.matrix_exp(logm_F_new)
             new_row_vector_cell = torch.bmm(
                 state.reference_row_vector_cell, F_new.transpose(-2, -1)
             )
             state.row_vector_cell = new_row_vector_cell
-        else:  # UnitCellFire
+        else:
             assert isinstance(state, UnitCellFireState)
-            # Unit cell update logic
             F_current = state.deform_grad()
-            # state.cell_factor is (N,1,1), F_current is (N,3,3)
-            # cell_factor_exp for element-wise F_current * cell_factor_exp should be
-            # (N,3,3) or broadcast from (N,1,1) or (N,3,1)
             cell_factor_exp_mult = state.cell_factor.expand(n_batches, 3, 1)
             current_F_scaled = F_current * cell_factor_exp_mult
 
             F_new_scaled = current_F_scaled + dr_cell
-            state.cell_positions = F_new_scaled  # track the scaled deformation gradient
-            F_new = F_new_scaled / (cell_factor_exp_mult + eps)  # Division by (N,3,1)
-            # When state.cell is set, state.row_vector_cell is auto-updated
+            state.cell_positions = F_new_scaled
+            F_new = F_new_scaled / (cell_factor_exp_mult + eps)
             new_cell_column_vectors = torch.bmm(
                 state.reference_cell, F_new.transpose(-2, -1)
             )
             state.cell = new_cell_column_vectors
 
-    # Scale atomic positions according to cell change (mimicking scale_atoms=True)
-    if is_cell_optimization and old_row_vector_cell is not None:
-        current_new_row_vector_cell = state.row_vector_cell  # This is A_new after update
-
+        # rescale the positions after cell update
+        current_new_row_vector_cell = state.row_vector_cell
         inv_old_cell_batch = torch.linalg.inv(old_row_vector_cell)
-        # Transform matrix T such that A_new = A_old @ T (for row vectors A)
-        # This means cartesian positions P_new_row = P_old_row @ T
         transform_matrix_batch = torch.bmm(
             inv_old_cell_batch, current_new_row_vector_cell
-        )  # Shape [N_batch, 3, 3]
-
-        # Shape: [N_atoms, 3, 3]
+        )
         atom_specific_transform = transform_matrix_batch[state.batch]
-
-        # state.positions is [N_atoms, 3]. Unsqueeze to [N_atoms, 1, 3] for bmm
-        # Result of bmm will be [N_atoms, 1, 3], then squeeze
         scaled_positions = torch.bmm(
             state.positions.unsqueeze(1), atom_specific_transform
         ).squeeze(1)
         state.positions = scaled_positions
 
-    # 8. Force / stress refresh & new cell forces
+    # 7. Force / stress refresh & new cell forces
     results = model(state)
     state.forces = results["forces"]
     state.energy = results["energy"]
@@ -1648,7 +1612,6 @@ def _ase_fire_step(  # noqa: C901, PLR0915
                 f"WARNING: Non-positive volume(s) detected during _ase_fire_step: "
                 f"{volumes[bad_indices].tolist()} at {bad_indices=} ({is_frechet=})"
             )
-            # volumes = torch.clamp(volumes, min=eps) # Optional: for stability
 
         virial = -volumes * (state.stress + state.pressure)
 
@@ -1657,7 +1620,8 @@ def _ase_fire_step(  # noqa: C901, PLR0915
             virial = diag_mean.unsqueeze(-1) * torch.eye(
                 3, device=device, dtype=dtype
             ).unsqueeze(0).expand(n_batches, -1, -1)
-        if state.constant_volume:  # Can be true even if hydrostatic_strain is false
+
+        if state.constant_volume:
             diag_mean = torch.diagonal(virial, dim1=1, dim2=2).mean(dim=1, keepdim=True)
             virial = virial - diag_mean.unsqueeze(-1) * torch.eye(
                 3, device=device, dtype=dtype
@@ -1671,7 +1635,6 @@ def _ase_fire_step(  # noqa: C901, PLR0915
             assert logm_F_new is not None, (
                 "logm_F_new should be defined for Frechet cell force calculation"
             )
-            # Frechet cell force recalculation
             ucf_cell_grad = torch.bmm(
                 virial, torch.linalg.inv(torch.transpose(F_new, 1, 2))
             )
@@ -1683,7 +1646,6 @@ def _ase_fire_step(  # noqa: C901, PLR0915
 
             new_cell_forces_log_space = torch.zeros_like(state.cell_forces)
             for b_idx in range(n_batches):
-                # logm_F_new[b_idx] is the current point in log-space
                 expm_derivs = torch.stack(
                     [
                         tsm.expm_frechet(logm_F_new[b_idx], direction, compute_expm=False)
@@ -1694,12 +1656,9 @@ def _ase_fire_step(  # noqa: C901, PLR0915
                     expm_derivs * ucf_cell_grad[b_idx].unsqueeze(0), dim=(1, 2)
                 )
                 new_cell_forces_log_space[b_idx] = forces_flat.reshape(3, 3)
-            state.cell_forces = new_cell_forces_log_space / (
-                state.cell_factor + eps
-            )  # cell_factor is (N,1,1)
-        else:  # UnitCellFire
+            state.cell_forces = new_cell_forces_log_space / (state.cell_factor + eps)
+        else:
             assert isinstance(state, UnitCellFireState)
-            # Unit cell force recalculation
-            state.cell_forces = virial / state.cell_factor  # cell_factor is (N,1,1)
+            state.cell_forces = virial / state.cell_factor
 
     return state
