@@ -997,7 +997,7 @@ def batched_vdot(
 
     Args:
         x: Tensor of shape [N_total_entities, D] (e.g., forces, velocities).
-        y: Tensor of shape [N_total_entities, D]. Ignored if is_sum_sq is True.
+        y: Tensor of shape [N_total_entities, D].
         batch_indices: Tensor of shape [N_total_entities] indicating batch membership.
 
     Returns:
