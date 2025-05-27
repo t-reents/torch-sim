@@ -1504,7 +1504,7 @@ def _ase_fire_step(  # noqa: C901, PLR0915
         v_scaling_batch = tsm.batched_vdot(
             state.velocities, state.velocities, state.batch
         )
-        f_scaling_batch = tsm.batched_vdot(state.forces, state.forces, state.batch)
+        f_scaling_batch = tsm.batched_vdot(forces, forces, state.batch)
 
         if is_cell_optimization:
             v_scaling_batch += state.cell_velocities.pow(2).sum(dim=(1, 2))
@@ -1524,7 +1524,7 @@ def _ase_fire_step(  # noqa: C901, PLR0915
 
         v_scaling_atom = torch.sqrt(v_scaling_batch[state.batch].unsqueeze(-1))
         f_scaling_atom = torch.sqrt(f_scaling_batch[state.batch].unsqueeze(-1))
-        v_mixing_atom = state.forces * (v_scaling_atom / (f_scaling_atom + eps))
+        v_mixing_atom = forces * (v_scaling_atom / (f_scaling_atom + eps))
 
         alpha_atom = state.alpha[state.batch].unsqueeze(-1)  # per-atom alpha
         state.velocities = torch.where(
@@ -1534,7 +1534,7 @@ def _ase_fire_step(  # noqa: C901, PLR0915
         )
 
     # 4. Acceleration (single forward-Euler, no mass for ASE FIRE)
-    state.velocities += state.forces * state.dt[state.batch].unsqueeze(-1)
+    state.velocities += forces * state.dt[state.batch].unsqueeze(-1)
     dr_atom = state.velocities * state.dt[state.batch].unsqueeze(-1)
     dr_scaling_batch = tsm.batched_vdot(dr_atom, dr_atom, state.batch)
 
