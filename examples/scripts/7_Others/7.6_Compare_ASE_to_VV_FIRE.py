@@ -171,7 +171,9 @@ def run_optimization_ts(  # noqa: PLR0915
     convergence_steps = torch.full(
         (total_structures,), -1, dtype=torch.long, device=device
     )
-    convergence_fn = ts.generate_force_convergence_fn(force_tol=force_tol, include_cell_forces=ts_use_frechet)
+    convergence_fn = ts.generate_force_convergence_fn(
+        force_tol=force_tol, include_cell_forces=ts_use_frechet
+    )
     converged_tensor_global = torch.zeros(
         total_structures, dtype=torch.bool, device=device
     )

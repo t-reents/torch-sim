@@ -1552,9 +1552,6 @@ def _ase_fire_step(  # noqa: C901, PLR0915
             dr_cell,
         )
 
-        # save the old cell to allow rescaling of the positions after cell update
-        old_row_vector_cell = state.row_vector_cell.clone()
-
     dr_scaling_atom = torch.sqrt(dr_scaling_batch)[state.batch].unsqueeze(-1)
 
     dr_atom = torch.where(
@@ -1562,13 +1559,13 @@ def _ase_fire_step(  # noqa: C901, PLR0915
     )
 
     if is_cell_optimization:
-        state.positions = torch.linalg.solve(
-            cur_deform_grad[state.batch], state.positions.unsqueeze(-1)
-        ).squeeze(-1) + dr_atom
-    else:
-        state.positions = state.positions + dr_atom
+        state.positions = (
+            torch.linalg.solve(
+                cur_deform_grad[state.batch], state.positions.unsqueeze(-1)
+            ).squeeze(-1)
+            + dr_atom
+        )
 
-    if is_cell_optimization:
         if is_frechet:
             assert isinstance(state, FrechetCellFIREState)
             new_logm_F_scaled = state.cell_positions + dr_cell
@@ -1593,16 +1590,11 @@ def _ase_fire_step(  # noqa: C901, PLR0915
             )
             state.cell = new_cell_column_vectors
 
-        # rescale the positions after cell update
-        current_new_row_vector_cell = state.row_vector_cell
-        inv_old_cell_batch = torch.linalg.inv(old_row_vector_cell)
-        transform_matrix_batch = torch.bmm(
-            inv_old_cell_batch, current_new_row_vector_cell
-        )
-
         state.positions = torch.bmm(
-                state.positions.unsqueeze(1), F_new[state.batch].transpose(-2, -1)
-            ).squeeze(1)
+            state.positions.unsqueeze(1), F_new[state.batch].transpose(-2, -1)
+        ).squeeze(1)
+    else:
+        state.positions = state.positions + dr_atom
 
     # 7. Force / stress refresh & new cell forces
     results = model(state)

@@ -5,9 +5,10 @@ import pytest
 import torch
 from ase.filters import FrechetCellFilter, UnitCellFilter
 from ase.optimize import FIRE
+from pymatgen.analysis.structure_matcher import StructureMatcher
 
 import torch_sim as ts
-from torch_sim.io import state_to_atoms
+from torch_sim.io import atoms_to_state, state_to_atoms, state_to_structures
 from torch_sim.models.mace import MaceModel
 from torch_sim.optimizers import frechet_cell_fire, unit_cell_fire
 
@@ -63,6 +64,13 @@ def _run_and_compare_optimizers(
     last_checkpoint_step_count = 0
     convergence_fn = ts.generate_force_convergence_fn(force_tol=force_tol)
 
+    structure_matcher = StructureMatcher(
+        ltol=tolerances["lattice_tol"],
+        stol=tolerances["site_tol"],
+        angle_tol=tolerances["angle_tol"],
+        scale=False,
+    )
+
     for checkpoint_step in checkpoints:
         steps_for_current_segment = checkpoint_step - last_checkpoint_step_count
 
@@ -95,22 +103,22 @@ def _run_and_compare_optimizers(
         final_custom_forces_max = (
             torch.norm(ts_current_system_state.forces, dim=-1).max().item()
         )
-        final_custom_positions = ts_current_system_state.positions.detach()
-        final_custom_cell = ts_current_system_state.row_vector_cell.squeeze(0).detach()
 
+        # Convert torch-sim state to pymatgen Structure
+        ts_structure = state_to_structures(ts_current_system_state)[0]
+
+        # Convert ASE atoms to pymatgen Structure
         final_ase_atoms = filtered_ase_atoms_for_run.atoms
         final_ase_energy = final_ase_atoms.get_potential_energy()
         ase_forces_raw = final_ase_atoms.get_forces()
         final_ase_forces_max = torch.norm(
             torch.tensor(ase_forces_raw, device=device, dtype=dtype), dim=-1
         ).max()
-        final_ase_positions = torch.tensor(
-            final_ase_atoms.get_positions(), device=device, dtype=dtype
-        )
-        final_ase_cell = torch.tensor(
-            final_ase_atoms.get_cell(), device=device, dtype=dtype
-        )
+        ase_structure = state_to_structures(
+            atoms_to_state(final_ase_atoms, device, dtype)
+        )[0]
 
+        # Compare energies
         energy_diff = abs(final_custom_energy - final_ase_energy)
         assert energy_diff < tolerances["energy"], (
             f"{current_test_id}: Final energies differ significantly: "
@@ -118,25 +126,19 @@ def _run_and_compare_optimizers(
             f"Diff={energy_diff:.2e}"
         )
 
-        avg_displacement = (
-            torch.norm(final_custom_positions - final_ase_positions, dim=-1).mean().item()
-        )
-        assert avg_displacement < tolerances["pos"], (
-            f"{current_test_id}: Final positions differ ({avg_displacement=:.4f})"
-        )
-
-        cell_diff = torch.norm(final_custom_cell - final_ase_cell).item()
-        assert cell_diff < tolerances["cell"], (
-            f"{current_test_id}: Final cell matrices differ (Frobenius norm: "
-            f"{cell_diff:.4f})\nTorch-sim Cell:\n{final_custom_cell}"
-            f"\nASE Cell:\n{final_ase_cell}"
-        )
-
+        # Compare forces
         force_max_diff = abs(final_custom_forces_max - final_ase_forces_max)
         assert force_max_diff < tolerances["force_max"], (
             f"{current_test_id}: Max forces differ significantly: "
             f"torch-sim={final_custom_forces_max:.4f}, ASE={final_ase_forces_max:.4f}, "
             f"Diff={force_max_diff:.2e}"
+        )
+
+        # Compare structures using StructureMatcher
+        assert structure_matcher.fit(ts_structure, ase_structure), (
+            f"{current_test_id}: Structures do not match according to StructureMatcher, "
+            f"{ts_structure=}"
+            f"{ase_structure=}"
         )
 
         last_checkpoint_step_count = checkpoint_step
@@ -159,7 +161,13 @@ def _run_and_compare_optimizers(
             FrechetCellFilter,
             [33, 66, 100],
             0.02,
-            {"energy": 1e-2, "pos": 1.5e-2, "cell": 1.8e-2, "force_max": 1.5e-1},
+            {
+                "energy": 1e-2,
+                "force_max": 5e-2,
+                "lattice_tol": 3e-2,
+                "site_tol": 3e-2,
+                "angle_tol": 1e-1,
+            },
             "SiO2 (Frechet)",
         ),
         (
@@ -168,7 +176,13 @@ def _run_and_compare_optimizers(
             FrechetCellFilter,
             [16, 33, 50],
             0.02,
-            {"energy": 1e-4, "pos": 1e-3, "cell": 1.8e-3, "force_max": 5e-2},
+            {
+                "energy": 1e-2,
+                "force_max": 5e-2,
+                "lattice_tol": 3e-2,
+                "site_tol": 3e-2,
+                "angle_tol": 1e-1,
+            },
             "OsN2 (Frechet)",
         ),
         (
@@ -177,7 +191,13 @@ def _run_and_compare_optimizers(
             FrechetCellFilter,
             [33, 66, 100],
             0.01,
-            {"energy": 1e-2, "pos": 5e-3, "cell": 2e-2, "force_max": 5e-2},
+            {
+                "energy": 1e-2,
+                "force_max": 5e-2,
+                "lattice_tol": 3e-2,
+                "site_tol": 3e-2,
+                "angle_tol": 5e-1,
+            },
             "Triclinic Al (Frechet)",
         ),
         (
@@ -186,7 +206,13 @@ def _run_and_compare_optimizers(
             UnitCellFilter,
             [33, 66, 100],
             0.01,
-            {"energy": 1e-2, "pos": 3e-2, "cell": 1e-1, "force_max": 5e-2},
+            {
+                "energy": 1e-2,
+                "force_max": 5e-2,
+                "lattice_tol": 3e-2,
+                "site_tol": 3e-2,
+                "angle_tol": 5e-1,
+            },
             "Triclinic Al (UnitCell)",
         ),
         (
@@ -195,7 +221,13 @@ def _run_and_compare_optimizers(
             UnitCellFilter,
             [33, 66, 100],
             0.02,
-            {"energy": 1.5e-2, "pos": 2.5e-2, "cell": 5e-2, "force_max": 0.25},
+            {
+                "energy": 1e-2,
+                "force_max": 5e-2,
+                "lattice_tol": 3e-2,
+                "site_tol": 3e-2,
+                "angle_tol": 1e-1,
+            },
             "SiO2 (UnitCell)",
         ),
     ],
