@@ -592,7 +592,7 @@ def fire(
             batch=state.batch.clone(),
             pbc=state.pbc,
             # New attributes
-            velocities=torch.zeros_like(state.positions),
+            velocities=None,
             forces=forces,
             energy=energy,
             # Optimization attributes
@@ -1491,10 +1491,10 @@ def _ase_fire_step(  # noqa: C901, PLR0915
         pos_mask_batch = batch_power > 0.0
         neg_mask_batch = ~pos_mask_batch
 
-        state.n_pos[pos_mask_batch] += 1
         inc_mask = (state.n_pos > n_min) & pos_mask_batch
         state.dt[inc_mask] = torch.minimum(state.dt[inc_mask] * f_inc, dt_max)
         state.alpha[inc_mask] *= f_alpha
+        state.n_pos[pos_mask_batch] += 1
 
         state.dt[neg_mask_batch] *= f_dec
         state.alpha[neg_mask_batch] = alpha_start_batch[neg_mask_batch]
