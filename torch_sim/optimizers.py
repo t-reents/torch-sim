@@ -1469,14 +1469,16 @@ def _ase_fire_step(  # noqa: C901, PLR0915
             state.cell_velocities = torch.zeros(
                 (n_batches, 3, 3), device=device, dtype=dtype
             )
+            cur_deform_grad = state.deform_grad()
     else:
         alpha_start_batch = torch.full(
             (n_batches,), alpha_start.item(), device=device, dtype=dtype
         )
 
         if is_cell_optimization:
+            cur_deform_grad = state.deform_grad()
             forces = torch.bmm(
-                state.forces.unsqueeze(1), state.deform_grad()[state.batch]
+                state.forces.unsqueeze(1), cur_deform_grad[state.batch]
             ).squeeze(1)
         else:
             forces = state.forces
@@ -1554,10 +1556,17 @@ def _ase_fire_step(  # noqa: C901, PLR0915
         old_row_vector_cell = state.row_vector_cell.clone()
 
     dr_scaling_atom = torch.sqrt(dr_scaling_batch)[state.batch].unsqueeze(-1)
+
     dr_atom = torch.where(
         dr_scaling_atom > max_step, max_step * dr_atom / (dr_scaling_atom + eps), dr_atom
     )
-    state.positions = state.positions + dr_atom
+
+    if is_cell_optimization:
+        state.positions = torch.linalg.solve(
+            cur_deform_grad[state.batch], state.positions.unsqueeze(-1)
+        ).squeeze(-1) + dr_atom
+    else:
+        state.positions = state.positions + dr_atom
 
     if is_cell_optimization:
         if is_frechet:
@@ -1590,11 +1599,10 @@ def _ase_fire_step(  # noqa: C901, PLR0915
         transform_matrix_batch = torch.bmm(
             inv_old_cell_batch, current_new_row_vector_cell
         )
-        atom_specific_transform = transform_matrix_batch[state.batch]
-        scaled_positions = torch.bmm(
-            state.positions.unsqueeze(1), atom_specific_transform
-        ).squeeze(1)
-        state.positions = scaled_positions
+
+        state.positions = torch.bmm(
+                state.positions.unsqueeze(1), F_new[state.batch].transpose(-2, -1)
+            ).squeeze(1)
 
     # 7. Force / stress refresh & new cell forces
     results = model(state)
