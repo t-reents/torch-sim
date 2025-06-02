@@ -866,13 +866,13 @@ def unit_cell_fire(
             batch=state.batch.clone(),
             pbc=state.pbc,
             # New attributes
-            velocities=torch.zeros_like(state.positions),
+            velocities=None,
             forces=forces,
             energy=energy,
             stress=stress,
             # Cell attributes
             cell_positions=torch.zeros(n_batches, 3, 3, device=device, dtype=dtype),
-            cell_velocities=torch.zeros(n_batches, 3, 3, device=device, dtype=dtype),
+            cell_velocities=None,
             cell_forces=cell_forces,
             cell_masses=cell_masses,
             # Optimization attributes
@@ -1585,10 +1585,10 @@ def _ase_fire_step(  # noqa: C901, PLR0915
             F_new_scaled = current_F_scaled + dr_cell
             state.cell_positions = F_new_scaled
             F_new = F_new_scaled / (cell_factor_exp_mult + eps)
-            new_cell_column_vectors = torch.bmm(
-                state.reference_cell, F_new.transpose(-2, -1)
+            new_row_vector_cell = torch.bmm(
+                state.reference_row_vector_cell, F_new.transpose(-2, -1)
             )
-            state.cell = new_cell_column_vectors
+            state.row_vector_cell = new_row_vector_cell
 
         state.positions = torch.bmm(
             state.positions.unsqueeze(1), F_new[state.batch].transpose(-2, -1)
