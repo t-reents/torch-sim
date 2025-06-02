@@ -113,7 +113,9 @@ def _run_and_compare_optimizers(
     ase_optimizer = FIRE(filtered_ase_atoms_for_run, logfile=None)
 
     last_checkpoint_step_count = 0
-    convergence_fn = ts.generate_force_convergence_fn(force_tol=force_tol)
+    convergence_fn = ts.generate_force_convergence_fn(
+        force_tol=force_tol, include_cell_forces=True
+    )
 
     results = torchsim_mace_mpa(ts_current_system_state)
     ts_initial_system_state = ts_current_system_state.clone()
@@ -138,6 +140,7 @@ def _run_and_compare_optimizers(
                 optimizer=optimizer_callable_for_ts_optimize,
                 max_steps=steps_for_current_segment,
                 convergence_fn=convergence_fn,
+                steps_between_swaps=1,
             )
             ts_current_system_state = updated_ts_state.clone()
 

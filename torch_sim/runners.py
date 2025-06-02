@@ -16,6 +16,12 @@ from tqdm import tqdm
 
 from torch_sim.autobatching import BinningAutoBatcher, InFlightAutoBatcher
 from torch_sim.models.interface import ModelInterface
+from torch_sim.optimizers import (
+    FireState,
+    FrechetCellFIREState,
+    UnitCellFireState,
+    UnitCellGDState,
+)
 from torch_sim.quantities import batchwise_max_force, calc_kinetic_energy, calc_kT
 from torch_sim.state import SimState, concatenate_states, initialize_state
 from torch_sim.trajectory import TrajectoryReporter
@@ -389,13 +395,20 @@ def optimize(  # noqa: C901
     autobatcher = _configure_in_flight_autobatcher(
         model, state, autobatcher, max_attempts
     )
-    state = _chunked_apply(
-        init_fn,
-        state,
-        model,
-        max_memory_scaler=autobatcher.max_memory_scaler,
-        memory_scales_with=autobatcher.memory_scales_with,
-    )
+
+    if type(state) not in [
+        FireState,
+        UnitCellFireState,
+        UnitCellGDState,
+        FrechetCellFIREState,
+    ]:
+        state = _chunked_apply(
+            init_fn,
+            state,
+            model,
+            max_memory_scaler=autobatcher.max_memory_scaler,
+            memory_scales_with=autobatcher.memory_scales_with,
+        )
     autobatcher.load_states(state)
     trajectory_reporter = _configure_reporter(
         trajectory_reporter,
