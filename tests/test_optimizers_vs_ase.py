@@ -29,7 +29,7 @@ def _compare_ase_and_ts_states(
         scale=False,
     )
 
-    tkwargs = {
+    tensor_kwargs = {
         "device": ts_current_system_state.device,
         "dtype": ts_current_system_state.dtype,
     }
@@ -47,9 +47,10 @@ def _compare_ase_and_ts_states(
     final_ase_energy = final_ase_atoms.get_potential_energy()
     ase_forces_raw = final_ase_atoms.get_forces()
     final_ase_forces_max = torch.norm(
-        torch.tensor(ase_forces_raw, **tkwargs), dim=-1
+        torch.tensor(ase_forces_raw, **tensor_kwargs), dim=-1
     ).max()
-    ase_structure = state_to_structures(atoms_to_state(final_ase_atoms, **tkwargs))[0]
+    ts_state = atoms_to_state(final_ase_atoms, **tensor_kwargs)
+    ase_structure = state_to_structures(ts_state)[0]
 
     # Compare energies
     energy_diff = abs(final_custom_energy - final_ase_energy)
@@ -69,9 +70,8 @@ def _compare_ase_and_ts_states(
 
     # Compare structures using StructureMatcher
     assert structure_matcher.fit(ts_structure, ase_structure), (
-        f"{current_test_id}: Structures do not match according to StructureMatcher, "
-        f"{ts_structure=}"
-        f"{ase_structure=}"
+        f"{current_test_id}: Structures do not match according to StructureMatcher\n"
+        f"{ts_structure=}\n{ase_structure=}"
     )
 
 
