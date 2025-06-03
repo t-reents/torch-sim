@@ -338,6 +338,7 @@ def unit_cell_gradient_descent(  # noqa: PLR0915, C901
             forces=forces,
             energy=energy,
             stress=stress,
+            velocities=None,
             masses=state.masses,
             cell=state.cell,
             pbc=state.pbc,
@@ -476,6 +477,7 @@ class FireState(SimState):
     # Required attributes not in SimState
     forces: torch.Tensor
     energy: torch.Tensor
+    velocities: torch.Tensor | None
 
     # FIRE algorithm parameters
     dt: torch.Tensor
@@ -592,6 +594,7 @@ def fire(
             atomic_numbers=state.atomic_numbers.clone(),
             batch=state.batch.clone(),
             pbc=state.pbc,
+            velocities=None,
             forces=forces,
             energy=energy,
             # Optimization attributes
@@ -864,6 +867,7 @@ def unit_cell_fire(
             atomic_numbers=state.atomic_numbers.clone(),
             batch=state.batch.clone(),
             pbc=state.pbc,
+            velocities=None,
             forces=forces,
             energy=energy,
             stress=stress,
@@ -966,7 +970,7 @@ class FrechetCellFIREState(SimState, DeformGradMixin):
 
     # Cell attributes
     cell_positions: torch.Tensor
-    cell_velocities: torch.Tensor
+    cell_velocities: torch.Tensor | None
     cell_forces: torch.Tensor
     cell_masses: torch.Tensor
 
@@ -1162,6 +1166,7 @@ def frechet_cell_fire(
             atomic_numbers=state.atomic_numbers,
             batch=state.batch,
             pbc=state.pbc,
+            velocities=None,
             forces=forces,
             energy=energy,
             stress=stress,
