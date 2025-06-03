@@ -306,13 +306,15 @@ def generate_force_convergence_fn(
     ) -> bool:
         """Check if the system has converged."""
         force_conv = batchwise_max_force(state) < force_tol
-        if not include_cell_forces:
-            return force_conv
 
-        cell_forces_norm, _ = state.cell_forces.norm(dim=2).max(dim=1)
-        cell_force_conv = cell_forces_norm < force_tol
+        if include_cell_forces:
+            if (cell_forces := getattr(state, "cell_forces", None)) is None:
+                raise ValueError("cell_forces not found in state")
+            cell_forces_norm, _ = cell_forces.norm(dim=2).max(dim=1)
+            cell_force_conv = cell_forces_norm < force_tol
+            return force_conv & cell_force_conv
 
-        return force_conv & cell_force_conv
+        return force_conv
 
     return convergence_fn
 
@@ -396,12 +398,9 @@ def optimize(  # noqa: C901
         model, state, autobatcher, max_attempts
     )
 
-    if type(state) not in [
-        FireState,
-        UnitCellFireState,
-        UnitCellGDState,
-        FrechetCellFIREState,
-    ]:
+    if not isinstance(
+        state, (FireState, UnitCellFireState, UnitCellGDState, FrechetCellFIREState)
+    ):
         state = _chunked_apply(
             init_fn,
             state,
