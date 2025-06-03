@@ -476,7 +476,7 @@ class FireState(SimState):
     # Required attributes not in SimState
     forces: torch.Tensor
     energy: torch.Tensor
-    velocities: torch.Tensor
+    velocities: torch.Tensor | None = None
 
     # FIRE algorithm parameters
     dt: torch.Tensor
