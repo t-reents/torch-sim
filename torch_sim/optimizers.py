@@ -476,12 +476,13 @@ class FireState(SimState):
     # Required attributes not in SimState
     forces: torch.Tensor
     energy: torch.Tensor
-    velocities: torch.Tensor | None = None
 
     # FIRE algorithm parameters
     dt: torch.Tensor
     alpha: torch.Tensor
     n_pos: torch.Tensor
+
+    velocities: torch.Tensor | None = None
 
 
 def fire(
@@ -591,8 +592,6 @@ def fire(
             atomic_numbers=state.atomic_numbers.clone(),
             batch=state.batch.clone(),
             pbc=state.pbc,
-            # New attributes
-            velocities=None,
             forces=forces,
             energy=energy,
             # Optimization attributes
@@ -865,8 +864,6 @@ def unit_cell_fire(
             atomic_numbers=state.atomic_numbers.clone(),
             batch=state.batch.clone(),
             pbc=state.pbc,
-            # New attributes
-            velocities=None,
             forces=forces,
             energy=energy,
             stress=stress,
@@ -1165,8 +1162,6 @@ def frechet_cell_fire(
             atomic_numbers=state.atomic_numbers,
             batch=state.batch,
             pbc=state.pbc,
-            # New attributes
-            velocities=None,
             forces=forces,
             energy=energy,
             stress=stress,
