@@ -1204,11 +1204,11 @@ def frechet_cell_fire(
     return fire_init, functools.partial(step_func, **step_func_kwargs)
 
 
-VALID_FIRE_CELL_STATES = UnitCellFireState | FrechetCellFIREState
+AnyFireCellState = UnitCellFireState | FrechetCellFIREState
 
 
 def _vv_fire_step(  # noqa: C901, PLR0915
-    state: FireState | VALID_FIRE_CELL_STATES,
+    state: FireState | AnyFireCellState,
     model: torch.nn.Module,
     *,
     dt_max: torch.Tensor,
@@ -1220,7 +1220,7 @@ def _vv_fire_step(  # noqa: C901, PLR0915
     eps: float,
     is_cell_optimization: bool = False,
     is_frechet: bool = False,
-) -> FireState | VALID_FIRE_CELL_STATES:
+) -> FireState | AnyFireCellState:
     """Perform one Velocity-Verlet based FIRE optimization step.
 
     Implements one step of the Fast Inertial Relaxation Engine (FIRE) algorithm for
@@ -1252,9 +1252,9 @@ def _vv_fire_step(  # noqa: C901, PLR0915
     if state.velocities is None:
         state.velocities = torch.zeros_like(state.positions)
         if is_cell_optimization:
-            if not isinstance(state, VALID_FIRE_CELL_STATES):
+            if not isinstance(state, AnyFireCellState):
                 raise ValueError(
-                    "Cell optimization requires one of {VALID_FIRE_CELL_STATES}."
+                    f"Cell optimization requires one of {get_args(AnyFireCellState)}."
                 )
             state.cell_velocities = torch.zeros(
                 (n_batches, 3, 3), device=device, dtype=dtype
@@ -1418,7 +1418,7 @@ def _vv_fire_step(  # noqa: C901, PLR0915
 
 
 def _ase_fire_step(  # noqa: C901, PLR0915
-    state: FireState | VALID_FIRE_CELL_STATES,
+    state: FireState | AnyFireCellState,
     model: torch.nn.Module,
     *,
     dt_max: torch.Tensor,
@@ -1431,7 +1431,7 @@ def _ase_fire_step(  # noqa: C901, PLR0915
     eps: float,
     is_cell_optimization: bool = False,
     is_frechet: bool = False,
-) -> FireState | VALID_FIRE_CELL_STATES:
+) -> FireState | AnyFireCellState:
     """Perform one ASE-style FIRE optimization step.
 
     Implements one step of the Fast Inertial Relaxation Engine (FIRE) algorithm
@@ -1462,9 +1462,9 @@ def _ase_fire_step(  # noqa: C901, PLR0915
         state.velocities = torch.zeros_like(state.positions)
         forces = state.forces
         if is_cell_optimization:
-            if not isinstance(state, VALID_FIRE_CELL_STATES):
+            if not isinstance(state, AnyFireCellState):
                 raise ValueError(
-                    "Cell optimization requires one of {VALID_FIRE_CELL_STATES}."
+                    f"Cell optimization requires one of {get_args(AnyFireCellState)}."
                 )
             state.cell_velocities = torch.zeros(
                 (n_batches, 3, 3), device=device, dtype=dtype

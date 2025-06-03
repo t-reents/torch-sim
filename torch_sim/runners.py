@@ -537,8 +537,8 @@ def static(
         pbar_kwargs.setdefault("disable", None)
         tqdm_pbar = tqdm(total=state.n_batches, **pbar_kwargs)
 
-    for substate, batch_indices in batch_iterator:
-        print(substate.atomic_numbers)
+    for sub_state, batch_indices in batch_iterator:
+        print(sub_state.atomic_numbers)
         # set up trajectory reporters
         if autobatcher and trajectory_reporter and og_filenames is not None:
             # we must remake the trajectory reporter for each batch
@@ -546,20 +546,20 @@ def static(
                 filenames=[og_filenames[idx] for idx in batch_indices]
             )
 
-        model_outputs = model(substate)
+        model_outputs = model(sub_state)
 
-        substate = StaticState(
-            **vars(substate),
+        sub_state = StaticState(
+            **vars(sub_state),
             energy=model_outputs["energy"],
             forces=model_outputs["forces"] if model.compute_forces else None,
             stress=model_outputs["stress"] if model.compute_stress else None,
         )
 
-        props = trajectory_reporter.report(substate, 0, model=model)
+        props = trajectory_reporter.report(sub_state, 0, model=model)
         all_props.extend(props)
 
         if tqdm_pbar:
-            tqdm_pbar.update(substate.n_batches)
+            tqdm_pbar.update(sub_state.n_batches)
 
     trajectory_reporter.finish()
 
