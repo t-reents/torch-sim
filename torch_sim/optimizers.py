@@ -338,7 +338,6 @@ def unit_cell_gradient_descent(  # noqa: PLR0915, C901
             forces=forces,
             energy=energy,
             stress=stress,
-            velocities=None,
             masses=state.masses,
             cell=state.cell,
             pbc=state.pbc,
@@ -483,8 +482,6 @@ class FireState(SimState):
     dt: torch.Tensor
     alpha: torch.Tensor
     n_pos: torch.Tensor
-
-    velocities: torch.Tensor | None = None
 
 
 def fire(
