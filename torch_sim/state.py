@@ -106,6 +106,12 @@ class SimState:
                 f"masses {shapes[1]}, atomic_numbers {shapes[2]}"
             )
 
+        if self.cell.ndim != 3 and self.batch is None:
+            self.cell = self.cell.unsqueeze(0)
+
+        if self.cell.shape[-2:] != (3, 3):
+            raise ValueError("Cell must have shape (n_batches, 3, 3)")
+
         if self.batch is None:
             self.batch = torch.zeros(self.n_atoms, device=self.device, dtype=torch.int64)
         else:
@@ -113,6 +119,11 @@ class SimState:
             _, counts = torch.unique_consecutive(self.batch, return_counts=True)
             if not torch.all(counts == torch.bincount(self.batch)):
                 raise ValueError("Batch indices must be unique consecutive integers")
+
+        if self.cell.shape[0] != self.n_batches:
+            raise ValueError(
+                f"Cell must have shape (n_batches, 3, 3), got {self.cell.shape}"
+            )
 
     @property
     def wrap_positions(self) -> torch.Tensor:
@@ -173,7 +184,7 @@ class SimState:
     @property
     def row_vector_cell(self) -> torch.Tensor:
         """Unit cell following the row vector convention."""
-        return self.cell.transpose(-2, -1)
+        return self.cell.mT
 
     @row_vector_cell.setter
     def row_vector_cell(self, value: torch.Tensor) -> None:
@@ -182,7 +193,7 @@ class SimState:
         Args:
             value: The unit cell as a row vector
         """
-        self.cell = value.transpose(-2, -1)
+        self.cell = value.mT
 
     def clone(self) -> Self:
         """Create a deep copy of the SimState.
@@ -316,12 +327,12 @@ class DeformGradMixin:
     @property
     def reference_row_vector_cell(self) -> torch.Tensor:
         """Get the original unit cell in terms of row vectors."""
-        return self.reference_cell.transpose(-2, -1)
+        return self.reference_cell.mT
 
     @reference_row_vector_cell.setter
     def reference_row_vector_cell(self, value: torch.Tensor) -> None:
         """Set the original unit cell in terms of row vectors."""
-        self.reference_cell = value.transpose(-2, -1)
+        self.reference_cell = value.mT
 
     @staticmethod
     def _deform_grad(
