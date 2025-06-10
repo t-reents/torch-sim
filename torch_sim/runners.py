@@ -285,7 +285,7 @@ def _chunked_apply(
 
 
 def generate_force_convergence_fn(
-    force_tol: float = 1e-1, *, include_cell_forces: bool = False
+    force_tol: float = 1e-1, *, include_cell_forces: bool = True
 ) -> Callable:
     """Generate a force-based convergence function for the convergence_fn argument
     of the optimize function.
@@ -293,7 +293,7 @@ def generate_force_convergence_fn(
     Args:
         force_tol (float): Force tolerance for convergence
         include_cell_forces (bool): Whether to include the `cell_forces` in
-            the convergence check.
+            the convergence check. Defaults to True.
 
     Returns:
         Convergence function that takes a state and last energy and
@@ -303,8 +303,13 @@ def generate_force_convergence_fn(
     def convergence_fn(
         state: SimState,
         last_energy: torch.Tensor | None = None,  # noqa: ARG001
-    ) -> bool:
-        """Check if the system has converged."""
+    ) -> torch.Tensor:
+        """Check if the system has converged.
+
+        Returns:
+            torch.Tensor: Boolean tensor of shape (n_batches,) indicating
+                convergence status for each batch.
+        """
         force_conv = batchwise_max_force(state) < force_tol
 
         if include_cell_forces:
@@ -334,8 +339,13 @@ def generate_energy_convergence_fn(energy_tol: float = 1e-3) -> Callable:
     def convergence_fn(
         state: SimState,
         last_energy: torch.Tensor | None = None,
-    ) -> bool:
-        """Check if the system has converged."""
+    ) -> torch.Tensor:
+        """Check if the system has converged.
+
+        Returns:
+            torch.Tensor: Boolean tensor of shape (n_batches,) indicating
+                convergence status for each batch.
+        """
         return torch.abs(state.energy - last_energy) < energy_tol
 
     return convergence_fn
