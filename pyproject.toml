@@ -1,6 +1,6 @@
 [project]
 name = "torch_sim_atomistic"
-version = "0.2.1"
+version = "0.2.2"
 description = "A pytorch toolkit for calculating material properties using MLIPs"
 authors = [
     { name = "Abhijeet Gangan", email = "abhijeetgangan@g.ucla.edu" },
@@ -134,8 +134,20 @@ testpaths = ["tests"]
 # make these dependencies mutually exclusive since they use incompatible e3nn versions
 # see https://docs.astral.sh/uv/concepts/projects/config/#conflicting-dependencies for more details
 conflicts = [
-  [{ extra = "mace" }, { extra = "mattersim" }],
-  [{ extra = "mattersim" }, { extra = "graphpes" }],
-  [{ extra = "sevenn" }, { extra = "graphpes" }],
-  [{ extra = "mace" }, { extra = "sevenn" }],
+    [
+        { extra = "graphpes" },
+        { extra = "mattersim" },
+    ],
+    [
+        { extra = "graphpes" },
+        { extra = "sevenn" },
+    ],
+    [
+        { extra = "mace" },
+        { extra = "mattersim" },
+    ],
+    [
+        { extra = "mace" },
+        { extra = "sevenn" },
+    ],
 ]
