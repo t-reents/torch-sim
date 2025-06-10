@@ -20,7 +20,6 @@ Notes:
     model architectures and GPU configurations.
 """
 
-import logging
 from collections.abc import Callable, Iterator
 from itertools import chain
 from typing import Any, get_args
@@ -233,7 +232,7 @@ def measure_model_memory_forward(state: SimState, model: ModelInterface) -> floa
             "Memory estimation does not make sense on CPU and is unsupported."
         )
 
-    logging.info(  # noqa: LOG015
+    print(  # noqa: T201
         "Model Memory Estimation: Running forward pass on state with "
         f"{state.n_atoms} atoms and {state.n_batches} batches.",
     )
@@ -403,7 +402,7 @@ def estimate_max_memory_scaler(
     min_state = state_list[metric_values.argmin()]
     max_state = state_list[metric_values.argmax()]
 
-    logging.info(  # noqa: LOG015
+    print(  # noqa: T201
         "Model Memory Estimation: Estimating memory from worst case of "
         f"largest and smallest system. Largest system has {max_state.n_atoms} atoms "
         f"and {max_state.n_batches} batches, and smallest system has "
@@ -955,10 +954,8 @@ class InFlightAutoBatcher:
             self.max_memory_scaler = self.max_memory_scaler * self.max_memory_padding
         return concatenate_states([first_state, *states])
 
-    def next_batch(
-        self,
-        updated_state: SimState | None,
-        convergence_tensor: torch.Tensor | None,
+    def next_batch(  # noqa: C901
+        self, updated_state: SimState | None, convergence_tensor: torch.Tensor | None
     ) -> (
         tuple[SimState | None, list[SimState]]
         | tuple[SimState | None, list[SimState], list[int]]
@@ -1022,10 +1019,14 @@ class InFlightAutoBatcher:
 
         # assert statements helpful for debugging, should be moved to validate fn
         # the first two are most important
-        assert len(convergence_tensor) == updated_state.n_batches
-        assert len(self.current_idx) == len(self.current_scalers)
-        assert len(convergence_tensor.shape) == 1
-        assert updated_state.n_batches > 0
+        if len(convergence_tensor) != updated_state.n_batches:
+            raise ValueError(f"{len(convergence_tensor)=} != {updated_state.n_batches=}")
+        if len(self.current_idx) != len(self.current_scalers):
+            raise ValueError(f"{len(self.current_idx)=} != {len(self.current_scalers)=}")
+        if len(convergence_tensor.shape) != 1:
+            raise ValueError(f"{len(convergence_tensor.shape)=} != 1")
+        if updated_state.n_batches <= 0:
+            raise ValueError(f"{updated_state.n_batches=} <= 0")
 
         # Increment attempt counters and check for max attempts in a single loop
         for cur_idx, abs_idx in enumerate(self.current_idx):
