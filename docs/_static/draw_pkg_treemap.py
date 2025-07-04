@@ -6,6 +6,7 @@ Run with `uv run docs/_static/draw_pkg_treemap.py`
 # /// script
 # dependencies = [
 #     "pymatviz @ git+https://github.com/janosh/pymatviz",
+#     "plotly!=6.2.0", # TODO remove pin pending https://github.com/plotly/plotly.py/issues/5253#issuecomment-3016615635
 # ]
 # ///
 
