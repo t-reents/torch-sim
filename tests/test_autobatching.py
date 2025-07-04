@@ -376,6 +376,32 @@ def test_determine_max_batch_size_fibonacci(
     assert max_size == 8
 
 
+@pytest.mark.parametrize("scale_factor", [1.1, 1.4])
+def test_determine_max_batch_size_small_scale_factor_no_infinite_loop(
+    si_sim_state: ts.SimState,
+    lj_model: LennardJonesModel,
+    monkeypatch: pytest.MonkeyPatch,
+    scale_factor: float,
+) -> None:
+    """Test determine_max_batch_size doesn't infinite loop with small scale factors."""
+    monkeypatch.setattr(
+        "torch_sim.autobatching.measure_model_memory_forward", lambda *_: 0.1
+    )
+
+    max_size = determine_max_batch_size(
+        si_sim_state, lj_model, max_atoms=20, scale_factor=scale_factor
+    )
+    assert 0 < max_size <= 20
+
+    # Verify sequence is strictly increasing (prevents infinite loop)
+    sizes = [1]
+    while (next_size := max(round(sizes[-1] * scale_factor), sizes[-1] + 1)) < 20:
+        sizes.append(next_size)
+
+    assert all(sizes[idx] > sizes[idx - 1] for idx in range(1, len(sizes)))
+    assert max_size == sizes[-1]
+
+
 def test_in_flight_auto_batcher_restore_order(
     si_sim_state: ts.SimState,
     fe_supercell_sim_state: ts.SimState,

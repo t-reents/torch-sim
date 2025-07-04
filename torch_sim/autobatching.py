@@ -268,7 +268,7 @@ def determine_max_batch_size(
             Defaults to 500,000.
         start_size (int): Initial batch size to test. Defaults to 1.
         scale_factor (float): Factor to multiply batch size by in each iteration.
-            Defaults to 1.3.
+            Defaults to 1.6.
 
     Returns:
         int: Maximum number of batches that fit in GPU memory.
@@ -289,7 +289,7 @@ def determine_max_batch_size(
     """
     # Create a geometric sequence of batch sizes
     sizes = [start_size]
-    while (next_size := round(sizes[-1] * scale_factor)) < max_atoms:
+    while (next_size := max(round(sizes[-1] * scale_factor), sizes[-1] + 1)) < max_atoms:
         sizes.append(next_size)
 
     for i in range(len(sizes)):
