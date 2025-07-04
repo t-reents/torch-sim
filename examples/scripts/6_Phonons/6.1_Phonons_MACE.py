@@ -4,7 +4,7 @@
 # dependencies = [
 #     "mace-torch>=0.3.12",
 #     "phonopy>=2.35",
-#     "pymatviz[export-figs]>=0.15.1",
+#     "pymatviz>=0.15.1",
 #     "seekpath",
 #     "ase",
 # ]
